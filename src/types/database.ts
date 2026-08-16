@@ -38,6 +38,7 @@ export interface Machine {
   category: MachineCategory;
   expected_efficiency: number | null;
   capacity: number | null;
+  rate: number | null;
   active: boolean;
   created_at: string;
 }
@@ -78,20 +79,17 @@ export interface WorkLog {
 
 export type WorkLogInsert = Omit<WorkLog, "id" | "total_reading" | "created_at">;
 
-export interface GpsLog {
+export interface GpsReading {
   id: string;
   subdivision_id: string;
   machine_id: string;
-  work_log_id: string | null;
-  recorded_at: string;
-  latitude: number;
-  longitude: number;
-  location_label: string | null;
+  reading_date: string;
+  reading: number;
   created_by: string | null;
   created_at: string;
 }
 
-export type GpsLogInsert = Omit<GpsLog, "id" | "created_at" | "created_by">;
+export type GpsReadingUpsert = Omit<GpsReading, "id" | "created_at" | "created_by">;
 
 export type AttendanceStatus = "Present" | "Absent" | "Half Day" | "Leave";
 export type AttendanceSource = "manual" | "auto";

@@ -67,3 +67,16 @@ export function useUpdateMachineCapacity() {
     },
   });
 }
+
+export function useUpdateMachineRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ machineId, rate }: { machineId: string; rate: number | null }) => {
+      const { error } = await supabase.from("machines").update({ rate }).eq("id", machineId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["machines"] });
+    },
+  });
+}

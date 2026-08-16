@@ -23,8 +23,8 @@ const AttendanceEntryPage = lazy(() =>
 const PendingPaymentsPage = lazy(() =>
   import("@/pages/PendingPaymentsPage").then((m) => ({ default: m.PendingPaymentsPage }))
 );
-const GpsLogEntryPage = lazy(() =>
-  import("@/pages/GpsLogEntryPage").then((m) => ({ default: m.GpsLogEntryPage }))
+const GpsReadingEntryPage = lazy(() =>
+  import("@/pages/GpsReadingEntryPage").then((m) => ({ default: m.GpsReadingEntryPage }))
 );
 const MachineCapacityPage = lazy(() =>
   import("@/pages/MachineCapacityPage").then((m) => ({ default: m.MachineCapacityPage }))
@@ -48,7 +48,7 @@ export default function App() {
             <Route index element={<AdminDashboardPage />} />
             <Route path="attendance" element={<AttendanceEntryPage />} />
             <Route path="pending" element={<PendingPaymentsPage />} />
-            <Route path="gps" element={<GpsLogEntryPage />} />
+            <Route path="gps" element={<GpsReadingEntryPage />} />
             <Route path="machines" element={<MachineCapacityPage />} />
             <Route path="fuel-dashboard" element={<FuelDashboardPage />} />
           </Route>

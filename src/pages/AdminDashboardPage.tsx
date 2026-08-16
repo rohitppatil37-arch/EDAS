@@ -6,13 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
-import { useSubdivisions } from "@/lib/queries/masterData";
+import { useMachines, useSubdivisions } from "@/lib/queries/masterData";
 import { supabase } from "@/lib/supabaseClient";
 import { buildMachineReport } from "@/lib/excel/buildMachineReport";
 import { buildGpsReport } from "@/lib/excel/buildGpsReport";
 import { buildAttendanceReport } from "@/lib/excel/buildAttendanceReport";
 import { buildPendingReport } from "@/lib/excel/buildPendingReport";
-import type { Attendance, GpsLog, PendingPayment, WorkLog } from "@/types/database";
+import { buildGpsDiffMap } from "@/lib/gpsSeries";
+import type { GpsReading, WorkLog } from "@/types/database";
 
 function monthStart() {
   const d = new Date();
@@ -25,6 +26,12 @@ function todayIso() {
 
 type ReportType = "machine" | "gps" | "attendance" | "pending";
 
+type WorkLogRow = WorkLog & {
+  machines: { machine_name: string; machine_type: string; category: string } | null;
+  staff: { name: string } | null;
+  projects: { project_name: string; work_type: string } | null;
+};
+
 const reportCards: { type: ReportType; label: string; icon: typeof BarChart3 }[] = [
   { type: "machine", label: "सयंत्राच्या तास / किमी चा अहवाल", icon: BarChart3 },
   { type: "gps", label: "GPS अहवाल", icon: MapPin },
@@ -35,6 +42,7 @@ const reportCards: { type: ReportType; label: string; icon: typeof BarChart3 }[]
 export function AdminDashboardPage() {
   const { profile } = useAuth();
   const { data: subdivisions = [] } = useSubdivisions();
+  const { data: machines = [] } = useMachines();
   const [ranges, setRanges] = useState<Record<ReportType, { from: string; to: string }>>({
     machine: { from: monthStart(), to: todayIso() },
     gps: { from: monthStart(), to: todayIso() },
@@ -45,6 +53,7 @@ export function AdminDashboardPage() {
 
   const subdivisionId = profile?.subdivision_id ?? null;
   const subdivisionName = subdivisions.find((s) => s.id === subdivisionId)?.name ?? "All";
+  const subdivisionMachines = machines.filter((m) => m.subdivision_id === subdivisionId);
 
   function updateRange(type: ReportType, field: "from" | "to", value: string) {
     setRanges((r) => ({ ...r, [type]: { ...r[type], [field]: value } }));
@@ -60,63 +69,49 @@ export function AdminDashboardPage() {
       toast.error("कृपया दिनांक निवडा.");
       return;
     }
+    if (subdivisionMachines.length === 0) {
+      toast.error("सयंत्र माहिती अजून लोड होत आहे, कृपया थोड्या वेळाने प्रयत्न करा.");
+      return;
+    }
 
     setDownloading(type);
     try {
-      if (type === "machine") {
-        const { data, error } = await supabase
-          .from("work_logs")
-          .select("*, machines(machine_name, machine_type, category), staff(name), projects(project_name, work_type)")
-          .eq("subdivision_id", subdivisionId)
-          .gte("work_date", from)
-          .lte("work_date", to)
-          .order("work_date");
-        if (error) throw error;
-        await buildMachineReport(
-          data as (WorkLog & {
-            machines: { machine_name: string; machine_type: string; category: string } | null;
-            staff: { name: string } | null;
-            projects: { project_name: string; work_type: string } | null;
-          })[],
-          subdivisionName
-        );
-      } else if (type === "gps") {
-        const { data, error } = await supabase
-          .from("gps_logs")
-          .select("*, machines(machine_name)")
-          .eq("subdivision_id", subdivisionId)
-          .gte("recorded_at", from)
-          .lte("recorded_at", to)
-          .order("recorded_at");
-        if (error) throw error;
-        await buildGpsReport(data as (GpsLog & { machines: { machine_name: string } | null })[], subdivisionName);
-      } else if (type === "attendance") {
-        const { data, error } = await supabase
-          .from("attendance")
-          .select("*, staff(name, role)")
-          .eq("subdivision_id", subdivisionId)
-          .gte("attendance_date", from)
-          .lte("attendance_date", to)
-          .order("attendance_date");
-        if (error) throw error;
-        await buildAttendanceReport(
-          data as (Attendance & { staff: { name: string; role: string } | null })[],
-          subdivisionName
-        );
-      } else {
-        const { data, error } = await supabase
-          .from("pending_payments")
+      const { data: workLogData, error } = await supabase
+        .from("work_logs")
+        .select("*, machines(machine_name, machine_type, category), staff(name), projects(project_name, work_type)")
+        .eq("subdivision_id", subdivisionId)
+        .gte("work_date", from)
+        .lte("work_date", to)
+        .order("work_date");
+      if (error) throw error;
+      const rows = workLogData as WorkLogRow[];
+
+      if (type === "machine" || type === "gps") {
+        const { data: gpsData, error: gpsError } = await supabase
+          .from("gps_readings")
           .select("*")
-          .eq("subdivision_id", subdivisionId)
-          .gte("due_date", from)
-          .lte("due_date", to)
-          .order("due_date");
-        if (error) throw error;
-        await buildPendingReport(data as PendingPayment[], subdivisionName);
+          .eq("subdivision_id", subdivisionId);
+        if (gpsError) throw gpsError;
+        const gpsDiffMap = buildGpsDiffMap(gpsData as GpsReading[]);
+
+        if (type === "machine") {
+          await buildMachineReport(rows, subdivisionMachines, gpsDiffMap, subdivisionName, from, to);
+        } else {
+          await buildGpsReport(rows, subdivisionMachines, gpsDiffMap, subdivisionName, from, to);
+        }
+      } else if (type === "attendance") {
+        await buildAttendanceReport(rows, subdivisionMachines, subdivisionName, from, to);
+      } else {
+        await buildPendingReport(rows, subdivisionMachines, subdivisionName, from, to);
       }
       toast.success("अहवाल डाउनलोड झाला!");
-    } catch {
-      toast.error("Report generate करताना समस्या आली.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.startsWith("No")) {
+        toast.error("या कालावधीसाठी नोंदी आढळल्या नाहीत.");
+      } else {
+        toast.error("Report generate करताना समस्या आली.");
+      }
     } finally {
       setDownloading(null);
     }

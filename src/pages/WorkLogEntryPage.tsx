@@ -11,7 +11,6 @@ import {
   Fuel,
   Gauge,
   Home,
-  LayoutDashboard,
   Loader2,
   RotateCcw,
   Timer,
@@ -523,17 +522,10 @@ export function WorkLogEntryPage() {
 
         <Separator className="my-6" />
 
-        <div className="grid grid-cols-2 gap-3">
-          <Button type="button" variant="secondary" onClick={() => navigate("/dashboard")}>
-            <LayoutDashboard className="size-4" />
-            Dashboard
-          </Button>
-
-          <Button type="button" variant="outline" onClick={() => navigate("/")}>
-            <Home className="size-4" />
-            मुख्य पृष्ठ
-          </Button>
-        </div>
+        <Button type="button" variant="outline" className="w-full" onClick={() => navigate("/")}>
+          <Home className="size-4" />
+          मुख्य पृष्ठ
+        </Button>
       </form>
     </div>
   );

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Gauge, Loader2, Save, Truck } from "lucide-react";
+import { Gauge, IndianRupee, Loader2, Save, Truck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useMachines } from "@/lib/queries/masterData";
-import { useUpdateMachineCapacity } from "@/lib/queries/earthworkProgress";
+import { useUpdateMachineCapacity, useUpdateMachineRate } from "@/lib/queries/earthworkProgress";
 import type { Machine } from "@/types/database";
 
 function MachineRow({ machine, unitLabel }: { machine: Machine; unitLabel: string }) {
@@ -38,6 +38,53 @@ function MachineRow({ machine, unitLabel }: { machine: Machine; unitLabel: strin
       <p className="text-balance font-medium leading-snug">{machine.machine_name}</p>
       <div className="mt-2 flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">{unitLabel}</p>
+        <div className="flex shrink-0 items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            step="0.1"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-24"
+          />
+          <Button size="icon" variant="outline" disabled={!dirty || update.isPending} onClick={save} aria-label="जतन करा">
+            {update.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MachineRateRow({ machine }: { machine: Machine }) {
+  const [value, setValue] = useState(machine.rate != null ? String(machine.rate) : "");
+  const update = useUpdateMachineRate();
+
+  useEffect(() => {
+    setValue(machine.rate != null ? String(machine.rate) : "");
+  }, [machine.rate]);
+
+  const dirty = value !== (machine.rate != null ? String(machine.rate) : "");
+
+  async function save() {
+    const rate = value === "" ? null : Number(value);
+    if (rate !== null && (isNaN(rate) || rate < 0)) {
+      toast.error("कृपया योग्य दर भरा");
+      return;
+    }
+    try {
+      await update.mutateAsync({ machineId: machine.id, rate });
+      toast.success(`${machine.machine_name} चा दर जतन झाला!`);
+    } catch {
+      toast.error("जतन करताना समस्या आली.");
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="text-balance font-medium leading-snug">{machine.machine_name}</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">{machine.machine_type}</p>
         <div className="flex shrink-0 items-center gap-2">
           <Input
             type="number"
@@ -99,6 +146,23 @@ export function MachineCapacityPage() {
           )}
           {excavators.map((m) => (
             <MachineRow key={m.id} machine={m} unitLabel="घनमीटर / तास" />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-primary">
+            <IndianRupee className="size-4.5" />
+            सयंत्र दर (प्रलंबित रकमेच्या अहवालासाठी)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          {subdivisionMachines.length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">या उपविभागासाठी सयंत्र सापडले नाहीत.</p>
+          )}
+          {subdivisionMachines.map((m) => (
+            <MachineRateRow key={m.id} machine={m} />
           ))}
         </CardContent>
       </Card>

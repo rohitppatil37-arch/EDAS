@@ -1,0 +1,1744 @@
+/************************************************************
+  MECHANICAL DEPARTMENT – CENTRAL BACKEND ENGINE
+  Version: 2.0 (Scalable Architecture)
+************************************************************/
+
+const MASTER_ID = "1392hbqeW5MjDmyv5raCdtENeAJLvnZaE8xFTDbYXh3Q";
+const MASTER = SpreadsheetApp.openById(MASTER_ID);
+const REPORT_ENGINE_ID = "1YJypphgF96BFNQOk6ozlZ3WK4_0GZO1V3Vdx25HP0Nc";
+/* =========================================================
+   ENTRY POINT
+========================================================= */
+
+function doGet(e) {
+  try {
+
+    const mode = (e.parameter.mode || "").trim();
+
+    switch (mode) {
+
+case "config_all":
+return jsonSuccess(getAllConfig());
+
+case "dashboard":
+return jsonSuccess(
+getSubdivisionData(
+e.parameter.subdivision,
+e.parameter.token
+)
+);
+
+case "fuel_dashboard":
+return jsonSuccess(getFuelDashboardData(e));
+
+case "report":
+return generateReportAPI(e);
+
+default:
+return jsonError("Invalid mode parameter.");
+}
+
+  } catch (err) {
+    return jsonError(err.message);
+  }
+}
+
+function doPost(e) {
+
+  try {
+
+    const mode = e.parameter.mode || "";
+
+    // 🔐 LOGIN MODE
+    if (mode === "login") {
+      return handleLogin(e);
+    }
+
+    // 🔒 DATA SUBMISSION MODE
+    const lock = LockService.getScriptLock();
+
+if (!lock.tryLock(30000)) {
+  throw new Error("Server busy. कृपया पुन्हा प्रयत्न करा.");
+}
+
+    try {
+
+      if (!e.postData || !e.postData.contents)
+        throw new Error("No payload received.");
+
+      const payload = JSON.parse(e.postData.contents);
+
+      validateSubmission(payload);
+
+      saveToMaster(payload);
+      saveToSubdivision(payload);
+
+      return jsonSuccess({ result: "success" });
+
+    } finally {
+      lock.releaseLock();
+    }
+
+  } catch (err) {
+
+    return jsonError(err.message);
+  }
+}
+
+/* =========================================================
+   CONFIG SECTION
+========================================================= */
+
+function getAllConfig() {
+
+  const ss = MASTER;
+
+  return {
+    subdivisions: readSheet(ss, "Subdivision List"),
+    machines: readSheet(ss, "Subdivision Machines"),
+    staff: readSheet(ss, "Subdivision Staff"),
+    projects: readSheet(ss, "Subdivision Projects")
+  };
+}
+
+/* =========================================================
+   DASHBOARD SECTION
+========================================================= */
+
+function getSubdivisionData(subCode, token) {
+const props = PropertiesService.getScriptProperties();
+const validSub = props.getProperty("TOKEN_" + token);
+
+if (!validSub || validSub !== subCode) {
+  throw new Error("Unauthorized access.");
+}
+  if (!subCode)
+    throw new Error("Subdivision code missing.");
+
+  const ss = MASTER;
+  const subList = readSheet(ss, "Subdivision List");
+
+  const subRow = subList.find(r => r["Subdivision Code"] === subCode);
+
+  if (!subRow)
+    throw new Error("Invalid subdivision code.");
+
+  const dataSheetId = subRow["Data Sheet ID"];
+
+  if (!dataSheetId)
+    throw new Error("Data Sheet ID not configured.");
+
+  const subSS = SpreadsheetApp.openById(dataSheetId);
+
+  return readSheet(subSS, "Sheet1");
+}
+
+/* =========================================================
+   SAVE SECTION
+========================================================= */
+
+function saveToMaster(data) {
+
+  const ss = MASTER;
+  const sheet = ss.getSheetByName("Master Data");
+
+  appendRowByHeaders(sheet, data);
+}
+
+function saveToSubdivision(data) {
+
+  const ss = MASTER;
+  const subList = readSheet(ss, "Subdivision List");
+
+  const subCode = String(data["उपविभाग कोड"]).trim();
+
+  const subRow = subList.find(r =>
+    String(r["Subdivision Code"]).trim() === subCode
+  );
+
+  Logger.log("Incoming SubCode: " + subCode);
+  Logger.log("Found SubRow: " + JSON.stringify(subRow));
+
+  if (!subRow)
+    throw new Error("Subdivision not found in master list.");
+
+  const dataSheetId = String(subRow["Data Sheet ID"]).trim();
+
+  Logger.log("DataSheetID: " + dataSheetId);
+
+  if (!dataSheetId)
+    throw new Error("Subdivision sheet not linked.");
+
+  const subSS = SpreadsheetApp.openById(dataSheetId);
+
+  const sheet = subSS.getSheets()[0];
+
+  if (!sheet)
+    throw new Error("No sheet found in subdivision file.");
+
+  appendRowByHeaders(sheet, data);
+}
+
+/* =========================================================
+   VALIDATION
+========================================================= */
+
+function validateSubmission(data) {
+
+  if (!data["उपविभाग कोड"] || !data["उपविभाग"])
+    throw new Error("Subdivision details missing.");
+
+  if (!data["दिनांक"])
+    throw new Error("Date is required.");
+
+  if (!data["मशीन"])
+    throw new Error("Machine is required.");
+
+  if (!data["सुरुवातीचे reading"])
+    throw new Error("Start reading required.");
+
+  // 🔒 Reading Continuity Check
+  validateReadingContinuity(data);
+}
+
+/* =========================================================
+   UTILITIES
+========================================================= */
+function exportSpreadsheetToBase64(spreadsheetId){
+
+const url =
+"https://docs.google.com/spreadsheets/d/"+spreadsheetId+"/export?format=xlsx";
+
+const token = ScriptApp.getOAuthToken();
+
+const response = UrlFetchApp.fetch(url,{
+headers:{
+Authorization:"Bearer "+token
+}
+});
+
+const blob = response.getBlob();
+
+return {
+file: Utilities.base64Encode(blob.getBytes()),
+name: "Report_"+Date.now()+".xlsx"
+};
+
+}
+function getMachineRateMap(subCode){
+
+const master = MASTER;
+
+const machines = readSheet(master,"Subdivision Machines")
+.filter(r =>
+String(r["Subdivision Code"]).trim().toLowerCase() ===
+String(subCode).trim().toLowerCase()
+);
+
+const map = {};
+
+machines.forEach(r=>{
+const name = r["Machine Name"];
+const rate = Number(r["Use Rate"] || 0);
+
+map[name] = rate;
+});
+
+return map;
+
+}
+function readSheet(ss, sheetName) {
+
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet)
+    throw new Error("Sheet not found: " + sheetName);
+
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2)
+    return [];
+
+  const headers = values.shift();
+
+  return values.map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i]);
+    return obj;
+  });
+}
+
+/*
+  Header-safe row append
+  Column order independent
+*/
+function appendRowByHeaders(sheet, dataObj) {
+
+  const headers = sheet.getRange(1,1,1,sheet.getLastColumn())
+                       .getValues()[0];
+
+  const row = headers.map(h => dataObj[h] || "");
+
+  sheet.appendRow(row);
+}
+
+function jsonSuccess(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonError(message) {
+  return ContentService
+    .createTextOutput(JSON.stringify({ error: message }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function validateReadingContinuity(data) {
+
+  const machine = String(data["मशीन"]).trim();
+  const startReading = Number(data["सुरुवातीचे reading"]);
+
+  const ss = MASTER;
+  const sheet = ss.getSheetByName("Master Data");
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;   // first entry allowed
+
+  const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+
+  const machineIndex = headers.indexOf("मशीन");
+  const endReadingIndex = headers.indexOf("शेवटचे reading");
+
+  const values = sheet
+    .getRange(2,1,lastRow-1,sheet.getLastColumn())
+    .getValues();
+
+  let lastReading = null;
+
+  for (let i = values.length - 1; i >= 0; i--) {
+
+    if (String(values[i][machineIndex]).trim() === machine) {
+
+      const endVal = values[i][endReadingIndex];
+
+      if (endVal !== "" && endVal !== null) {
+        lastReading = Number(endVal);
+        break;
+      }
+    }
+  }
+
+  if (lastReading === null) return;
+
+  if (startReading !== lastReading) {
+
+    logMismatchAttempt(machine, startReading);
+
+    throw new Error(
+      "⚠️ सुरुवातीचे रीडिंग मागील नोंदीशी जुळत नाही. कृपया प्रत्यक्ष मशीनवरील रीडिंग तपासून भरा."
+    );
+  }
+}
+function logMismatchAttempt(machine, enteredReading) {
+
+  const ss = MASTER;
+
+  let logSheet = ss.getSheetByName("Reading Mismatch Log");
+
+  if (!logSheet) {
+    logSheet = ss.insertSheet("Reading Mismatch Log");
+    logSheet.appendRow(["Timestamp","Machine","Entered Start Reading"]);
+  }
+
+  logSheet.appendRow([
+    new Date(),
+    machine,
+    enteredReading
+  ]);
+}
+function handleLogin(e) {
+
+  const data = JSON.parse(e.postData.contents);
+
+  const username = data.username;
+  const password = data.password;
+
+  const ss = MASTER;
+  const loginSheet = ss.getSheetByName("Subdivision Login");
+
+  const values = loginSheet.getDataRange().getValues();
+  const headers = values.shift();
+
+  const uIndex = headers.indexOf("Username");
+  const pIndex = headers.indexOf("Password");
+  const subIndex = headers.indexOf("Subdivision Code");
+  const roleIndex = headers.indexOf("Role");
+  const activeIndex = headers.indexOf("Active");
+
+  for (let row of values) {
+
+    if (
+      row[uIndex] === username &&
+      row[pIndex] === password &&
+      row[activeIndex] === "YES"
+    ) {
+
+      const token = Utilities.getUuid();
+
+PropertiesService.getScriptProperties()
+  .setProperty("TOKEN_" + token, row[subIndex]);
+
+return jsonSuccess({
+  subdivisionCode: row[subIndex],
+  subdivisionName: getSubdivisionName(row[subIndex]),
+  role: row[roleIndex],
+  token: token
+});
+    }
+  }
+
+  return jsonError("Invalid credentials");
+}
+function getSubdivisionName(code){
+
+  const ss = MASTER;
+  const list = readSheet(ss, "Subdivision List");
+
+  const row = list.find(r => r["Subdivision Code"] === code);
+
+  return row ? row["Subdivision Name"] : code;
+}
+/* ===============================
+   REPORT GENERATION
+=============================== */
+
+function generateReportAPI(e){
+
+const type = e.parameter.type;
+
+if(!e.parameter.from || !e.parameter.to){
+return jsonError("Date range missing");
+}
+
+const from = new Date(e.parameter.from);
+const to = new Date(e.parameter.to);
+to.setHours(23,59,59,999);
+
+const subCode = e.parameter.subdivision;
+const token = e.parameter.token;
+
+/* token validation */
+
+const props = PropertiesService.getScriptProperties();
+const validSub = props.getProperty("TOKEN_" + token);
+
+if(!validSub || validSub !== subCode){
+return jsonError("Unauthorized");
+}
+
+/* REPORT ROUTING */
+
+if(type === "machine"){
+return generateMachineReportRange(subCode, from, to);
+}
+if(type === "gps"){
+return generateGPSReportRange(subCode, from, to);
+}
+if(type === "attendance"){
+return generateAttendanceReportRange(subCode, from, to);
+}
+if(type === "pending"){
+return generatePendingAmountReportRange(subCode, from, to);
+}
+return jsonError("Invalid report type");
+
+}
+
+function generateMachineReportRange(subCode, from, to){
+
+const lock = LockService.getScriptLock();
+
+if (!lock.tryLock(30000)) {
+  throw new Error("Server busy. कृपया 20 सेकंदांनी पुन्हा प्रयत्न करा.");
+}
+
+try {
+
+const master = MASTER;
+const list = readSheet(master,"Subdivision List");
+
+/* SUBDIVISION ROW */
+
+const row = list.find(
+r => String(r["Subdivision Code"]).trim().toLowerCase() === 
+     String(subCode).trim().toLowerCase()
+);
+
+if(!row) throw new Error("Subdivision not found");
+
+/* SUBDIVISION NAME */
+
+const subName = row["Subdivision Name"];
+
+/* DATA SHEET */
+
+const subSS = SpreadsheetApp.openById(String(row["Data Sheet ID"]).trim());
+const sheet = subSS.getSheets()[0];
+
+const values = sheet.getDataRange().getValues();
+const headers = values.shift();
+
+/* COLUMN INDEX */
+
+const colDate      = headers.indexOf("दिनांक");
+const colStart     = headers.indexOf("सुरुवातीचे reading");
+const colEnd       = headers.indexOf("शेवटचे reading");
+const colDashboard = headers.indexOf("Dashboard एकूण (तास/km)");
+const colDiesel    = headers.indexOf("डिझेल (लिटर)");
+const colMachine   = headers.indexOf("मशीन");
+const colGPS       = headers.indexOf("GPS (तास/किमी)");
+const colProject   = headers.indexOf("प्रकल्पाचे नाव");
+
+/* DATE FILTER */
+
+const data = values.filter(r=>{
+const d = new Date(r[colDate]);
+if(isNaN(d)) return false;
+return d>=from && d<=to;
+});
+
+if(data.length === 0){
+throw new Error("No data found in selected range");
+}
+
+/* MACHINE LIST */
+
+const machines = readSheet(master,"Subdivision Machines")
+.filter(r => 
+String(r["Subdivision Code"]).trim().toLowerCase() === 
+String(subCode).trim().toLowerCase()
+)
+.map(r=>r["Machine Name"])
+.sort();
+
+/* CREATE REPORT */
+
+const report = SpreadsheetApp.openById(REPORT_ENGINE_ID);
+
+/* clean old sheets */
+
+const sheets = report.getSheets();
+
+for (let i = sheets.length - 1; i > 0; i--) {
+  report.deleteSheet(sheets[i]);
+}
+
+sheets[0].clear();
+sheets[0].setName("TEMP");
+
+let summaryData=[];
+let grandDash=0;
+let grandDiesel=0;
+
+/* MACHINE SHEETS */
+
+machines.forEach(machine=>{
+
+const sh = report.insertSheet(machine.substring(0,80));
+
+const rows=[
+
+["मा. कार्यकारी अभियंता यांत्रिकी विभाग (को.प्र), अलोरे","","","","","",""],
+
+["यंत्रिकी उपविभाग : "+subName,"","","","","",""],
+
+["Machine / Vehicle : "+machine,"","","","","",""],
+
+["रिपोर्ट कालावधी : "+Utilities.formatDate(from,Session.getScriptTimeZone(),"dd-MM-yyyy")+" ते "+Utilities.formatDate(to,Session.getScriptTimeZone(),"dd-MM-yyyy"),"","","","","",""],
+
+["दिनांक","सुरुवातीचे reading","शेवटचे reading","Dashboard एकूण (तास/km)","प्रकल्प","डिझेल","GPS"]
+
+];
+
+let totalDash=0;
+let totalDiesel=0;
+
+/* DATA ROWS */
+
+data.forEach(r=>{
+
+if(String(r[colMachine]).trim().toLowerCase() !== String(machine).trim().toLowerCase()) return;
+
+const dash = Number(r[colDashboard]||0);
+const diesel = Number(r[colDiesel]||0);
+
+totalDash+=dash;
+totalDiesel+=diesel;
+
+rows.push([
+
+Utilities.formatDate(new Date(r[colDate]),Session.getScriptTimeZone(),"dd-MM-yyyy"),
+
+r[colStart],
+
+r[colEnd],
+
+dash,
+
+r[colProject],
+
+diesel,
+
+r[colGPS]
+
+]);
+
+});
+
+/* TOTAL ROW */
+
+rows.push(["","","","","","",""]);
+
+rows.push(["Total","","",totalDash,"",totalDiesel,""]);
+
+/* WRITE DATA */
+
+sh.getRange(1,1,rows.length,7).setValues(rows);
+
+/* DATE FORMAT */
+
+sh.getRange(6,1,rows.length-5,1)
+.setNumberFormat("dd-MM-yyyy");
+
+/* NUMBER FORMAT */
+
+sh.getRange(6,2,rows.length-5,1).setNumberFormat("0");
+sh.getRange(6,3,rows.length-5,1).setNumberFormat("0");
+sh.getRange(6,4,rows.length-5,1).setNumberFormat("0.00");
+sh.getRange(6,6,rows.length-5,1).setNumberFormat("0.00");
+sh.getRange(6,7,rows.length-5,1).setNumberFormat("0.00");
+
+/* MERGE HEADER */
+
+sh.getRange(1,1,1,7).merge();
+sh.getRange(2,1,1,7).merge();
+sh.getRange(3,1,1,7).merge();
+sh.getRange(4,1,1,7).merge();
+
+/* HEADER STYLE */
+
+sh.getRange(1,1)
+.setFontSize(15)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setVerticalAlignment("middle")
+.setBackground("#dbeafe");
+
+sh.getRange(2,1,3,7)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setVerticalAlignment("middle")
+.setBackground("#eef2ff");
+
+/* TABLE HEADER */
+
+sh.getRange(5,1,1,7)
+.setFontWeight("bold")
+.setBackground("#c7d2fe")
+.setHorizontalAlignment("center");
+
+/* WRAP TEXT */
+
+sh.getRange(1,1,rows.length,7).setWrap(true);
+
+/* COLUMN WIDTH */
+
+sh.setColumnWidth(1,120);
+sh.setColumnWidth(2,140);
+sh.setColumnWidth(3,140);
+sh.setColumnWidth(4,200);
+sh.setColumnWidth(5,320);
+sh.setColumnWidth(6,120);
+sh.setColumnWidth(7,120);
+sh.autoResizeColumns(1,7);
+/* ALIGNMENT */
+
+sh.getRange(6,1,rows.length-5,7)
+.setHorizontalAlignment("center");
+
+sh.getRange(6,5,rows.length-5,1)
+.setHorizontalAlignment("left")
+.setWrap(true);
+
+/* BORDERS */
+
+sh.getRange(5,1,rows.length-4,7)
+.setBorder(true,true,true,true,true,true);
+
+/* ZEBRA ROWS */
+
+for(let i=6;i<=rows.length;i++){
+if(i%2===0){
+sh.getRange(i,1,1,7).setBackground("#f9fafb");
+}
+}
+
+/* TOTAL STYLE */
+
+sh.getRange(rows.length,1,1,7)
+.setFontWeight("bold")
+.setBackground("#e0e7ff");
+
+/* FREEZE HEADER */
+
+sh.setFrozenRows(5);
+
+sh.autoResizeRows(1,rows.length);
+
+sh.getRange(6,1,rows.length-5,7)
+.setWrap(true);
+
+/* SUMMARY */
+
+summaryData.push([machine,totalDash,totalDiesel]);
+
+grandDash+=totalDash;
+grandDiesel+=totalDiesel;
+
+});
+const tempSheet = report.getSheetByName("TEMP");
+if (tempSheet) {
+  report.deleteSheet(tempSheet);
+}
+/* SUMMARY SHEET */
+
+const defaultSheet = report.getSheetByName("Sheet1");
+if(defaultSheet) report.deleteSheet(defaultSheet);
+
+const sum = report.insertSheet("Summary");
+
+const sumRows=[
+["Machine","Total Hours/KM","Diesel"]
+];
+
+summaryData.forEach(r=>sumRows.push(r));
+
+sumRows.push(["","",""]);
+sumRows.push(["Grand Total",grandDash,grandDiesel]);
+
+sum.getRange(1,1,sumRows.length,3).setValues(sumRows);
+
+sum.getRange(1,1,1,3)
+.setFontWeight("bold")
+.setBackground("#c7d2fe")
+.setHorizontalAlignment("center");
+
+sum.getRange(sumRows.length,1,1,3)
+.setFontWeight("bold");
+sum.setColumnWidth(1,180);
+sum.setColumnWidth(2,140);
+sum.setColumnWidth(3,140);
+sum.autoResizeColumns(1,3);
+sum.getRange(1,1,sumRows.length,3)
+.setBorder(true,true,true,true,true,true);
+for(let i=2;i<=sumRows.length;i++){
+if(i%2===0){
+sum.getRange(i,1,1,3).setBackground("#f9fafb");
+}
+}
+/* DOWNLOAD URL */
+
+const result = exportSpreadsheetToBase64(report.getId());
+
+
+
+return jsonSuccess(result);
+} finally {
+
+lock.releaseLock();
+
+}
+}
+
+
+function generateGPSReportRange(subCode, from, to){
+
+const lock = LockService.getScriptLock();
+
+if (!lock.tryLock(30000)) {
+  throw new Error("Server busy. कृपया 20 सेकंदांनी पुन्हा प्रयत्न करा.");
+}
+
+try {
+
+const master = MASTER;
+const list = readSheet(master,"Subdivision List");
+
+const row = list.find(
+r => String(r["Subdivision Code"]).trim().toLowerCase() === 
+     String(subCode).trim().toLowerCase()
+);
+
+if(!row) throw new Error("Subdivision not found");
+
+const subName = row["Subdivision Name"];
+
+const subSS = SpreadsheetApp.openById(String(row["Data Sheet ID"]).trim());
+const sheet = subSS.getSheets()[0];
+
+const values = sheet.getDataRange().getValues();
+const headers = values.shift();
+
+/* COLUMN INDEX */
+
+const colDate      = headers.indexOf("दिनांक");
+const colStart     = headers.indexOf("सुरुवातीचे reading");
+const colEnd       = headers.indexOf("शेवटचे reading");
+const colDashboard = headers.indexOf("Dashboard एकूण (तास/km)");
+const colGPS       = headers.indexOf("GPS (तास/किमी)");
+const colMachine   = headers.indexOf("मशीन");
+const colProject   = headers.indexOf("प्रकल्पाचे नाव");
+
+/* DATE FILTER */
+
+const data = values.filter(r=>{
+const d = new Date(r[colDate]);
+if(isNaN(d)) return false;
+return d>=from && d<=to;
+});
+
+if(data.length === 0){
+throw new Error("No GPS data found in selected range");
+}
+
+/* MACHINE LIST */
+
+const machines = readSheet(master,"Subdivision Machines")
+.filter(r => 
+String(r["Subdivision Code"]).trim().toLowerCase() === 
+String(subCode).trim().toLowerCase()
+)
+.map(r=>r["Machine Name"])
+.sort();
+
+/* CREATE REPORT */
+
+const report = SpreadsheetApp.openById(REPORT_ENGINE_ID);
+
+const sheets = report.getSheets();
+
+for (let i = sheets.length - 1; i > 0; i--) {
+  report.deleteSheet(sheets[i]);
+}
+
+sheets[0].clear();
+sheets[0].setName("TEMP");
+
+machines.forEach(machine=>{
+
+const sh = report.insertSheet(machine.substring(0,80));
+
+const rows=[
+
+["मा. कार्यकारी अभियंता यांत्रिकी विभाग (को.प्र), अलोरे","","","","",""],
+
+["यंत्रिकी उपविभाग : "+subName,"","","","",""],
+
+["Machine / Vehicle : "+machine,"","","","",""],
+
+["रिपोर्ट कालावधी : "+Utilities.formatDate(from,Session.getScriptTimeZone(),"dd-MM-yyyy")+" ते "+Utilities.formatDate(to,Session.getScriptTimeZone(),"dd-MM-yyyy"),"","","","",""],
+
+["दिनांक","सुरुवातीचे reading","शेवटचे reading","Dashboard एकूण (तास/km)","GPS (तास/किमी)","प्रकल्प"]
+
+];
+
+let totalDash=0;
+let totalGPS=0;
+
+/* DATA */
+
+data.forEach(r=>{
+
+if(String(r[colMachine]).trim().toLowerCase() !== String(machine).trim().toLowerCase()) return;
+
+const dash = Number(r[colDashboard]||0);
+const gps  = Number(r[colGPS]||0);
+
+totalDash+=dash;
+totalGPS+=gps;
+
+rows.push([
+
+Utilities.formatDate(new Date(r[colDate]),Session.getScriptTimeZone(),"dd-MM-yyyy"),
+
+r[colStart],
+r[colEnd],
+dash,
+gps,
+r[colProject]
+
+]);
+
+});
+
+/* TOTAL ROW */
+
+rows.push(["","","","","",""]);
+rows.push(["Total","","",totalDash,totalGPS,""]);
+
+/* WRITE DATA */
+
+sh.getRange(1,1,rows.length,6).setValues(rows);
+
+/* DATE FORMAT */
+
+sh.getRange(6,1,rows.length-5,1).setNumberFormat("dd-MM-yyyy");
+
+/* NUMBER FORMAT */
+
+sh.getRange(6,2,rows.length-5,1).setNumberFormat("0");
+sh.getRange(6,3,rows.length-5,1).setNumberFormat("0");
+sh.getRange(6,4,rows.length-5,1).setNumberFormat("0.00");
+sh.getRange(6,5,rows.length-5,1).setNumberFormat("0.00");
+
+/* MERGE HEADER */
+
+sh.getRange(1,1,1,6).merge();
+sh.getRange(2,1,1,6).merge();
+sh.getRange(3,1,1,6).merge();
+sh.getRange(4,1,1,6).merge();
+
+/* STYLE */
+
+sh.getRange(1,1)
+.setFontSize(15)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setBackground("#dbeafe");
+
+sh.getRange(2,1,3,6)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setBackground("#eef2ff");
+
+/* TABLE HEADER */
+
+sh.getRange(5,1,1,6)
+.setFontWeight("bold")
+.setBackground("#c7d2fe")
+.setHorizontalAlignment("center");
+
+/* WRAP */
+
+sh.getRange(1,1,rows.length,6).setWrap(true);
+
+/* COLUMN WIDTH */
+
+sh.setColumnWidth(1,120);
+sh.setColumnWidth(2,140);
+sh.setColumnWidth(3,140);
+sh.setColumnWidth(4,200);
+sh.setColumnWidth(5,160);
+sh.setColumnWidth(6,300);
+
+/* ALIGN */
+
+sh.getRange(6,1,rows.length-5,6)
+.setHorizontalAlignment("center");
+
+sh.getRange(6,6,rows.length-5,1)
+.setHorizontalAlignment("left");
+
+/* BORDERS */
+
+sh.getRange(5,1,rows.length-4,6)
+.setBorder(true,true,true,true,true,true);
+
+/* ZEBRA */
+
+for(let i=6;i<=rows.length;i++){
+if(i%2===0){
+sh.getRange(i,1,1,6).setBackground("#f9fafb");
+}
+}
+
+/* TOTAL */
+
+sh.getRange(rows.length,1,1,6)
+.setFontWeight("bold")
+.setBackground("#e0e7ff");
+
+/* FREEZE */
+
+sh.setFrozenRows(5);
+
+});
+
+/* DELETE DEFAULT */
+
+const defaultSheet = report.getSheetByName("Sheet1");
+if(defaultSheet) report.deleteSheet(defaultSheet);
+const tempSheet = report.getSheetByName("TEMP");
+if (tempSheet) {
+  report.deleteSheet(tempSheet);
+}
+/* DOWNLOAD */
+
+const result = exportSpreadsheetToBase64(report.getId());
+
+
+
+return jsonSuccess(result);
+} finally {
+
+lock.releaseLock();
+
+}
+
+}
+
+
+function generateAttendanceReportRange(subCode, from, to){
+const lock = LockService.getScriptLock();
+
+if (!lock.tryLock(30000)) {
+  throw new Error("Server busy. कृपया 20 सेकंदांनी पुन्हा प्रयत्न करा.");
+}
+
+try {
+const master = MASTER;
+const list = readSheet(master,"Subdivision List");
+
+const row = list.find(
+r => String(r["Subdivision Code"]).trim().toLowerCase() ===
+String(subCode).trim().toLowerCase()
+);
+
+if(!row) throw new Error("Subdivision not found");
+
+const subName = row["Subdivision Name"];
+
+const subSS = SpreadsheetApp.openById(String(row["Data Sheet ID"]).trim());
+const sheet = subSS.getSheets()[0];
+
+const values = sheet.getDataRange().getValues();
+const headers = values.shift();
+
+/* COLUMN INDEX */
+
+const colDate    = headers.indexOf("दिनांक");
+const colMachine = headers.indexOf("मशीन");
+const colStaff   = headers.indexOf("चालक");
+
+/* DATE FILTER */
+
+const data = values.filter(r=>{
+const d = new Date(r[colDate]);
+if(isNaN(d)) return false;
+return d>=from && d<=to;
+});
+
+if(data.length === 0){
+throw new Error("No attendance data found");
+}
+
+/* DAYS */
+
+const days = [];
+const temp = new Date(from);
+
+while(temp<=to){
+days.push(new Date(temp));
+temp.setDate(temp.getDate()+1);
+}
+
+/* MACHINE LIST */
+
+const machines = readSheet(master,"Subdivision Machines")
+.filter(r =>
+String(r["Subdivision Code"]).trim().toLowerCase() ===
+String(subCode).trim().toLowerCase()
+)
+.map(r=>r["Machine Name"])
+.sort();
+
+/* DRIVER MAP */
+
+const machineMap = {};
+
+data.forEach(r=>{
+
+const machine = r[colMachine];
+const driver  = r[colStaff];
+const d       = new Date(r[colDate]).getDate();
+
+if(!machineMap[machine]){
+machineMap[machine] = {drivers:[], attendance:{}};
+}
+
+if(driver && machineMap[machine].drivers.indexOf(driver)===-1){
+machineMap[machine].drivers.push(driver);
+}
+
+machineMap[machine].attendance[d] = "P";
+
+});
+
+/* CREATE REPORT */
+
+const report = SpreadsheetApp.openById(REPORT_ENGINE_ID);
+
+const sheets = report.getSheets();
+
+for (let i = sheets.length - 1; i > 0; i--) {
+  report.deleteSheet(sheets[i]);
+}
+
+sheets[0].clear();
+
+const sh = report.getSheets()[0];
+
+const rows=[];
+
+const totalCols = days.length + 4;
+
+function fillRow(arr){
+while(arr.length<totalCols){arr.push("")}
+return arr;
+}
+
+/* HEADER */
+
+rows.push(fillRow(["Driver / Operator Attendance Register"]));
+rows.push(fillRow(["Mechanical Sub-Division : "+subName]));
+rows.push(fillRow(["Period : "+
+Utilities.formatDate(from,Session.getScriptTimeZone(),"dd-MM-yyyy")
++" ते "+
+Utilities.formatDate(to,Session.getScriptTimeZone(),"dd-MM-yyyy")
+]));
+rows.push(fillRow([]));
+
+/* TABLE HEADER */
+
+const header=["SR No.","Driver / Operator Name","Machine"];
+
+days.forEach(d=>{
+header.push(
+Utilities.formatDate(d,Session.getScriptTimeZone(),"dd-MM")
+);
+});
+
+header.push("Total P");
+
+rows.push(fillRow(header));
+
+/* DATA */
+
+let sr=1;
+
+machines.forEach(machine=>{
+
+const machineData = machineMap[machine];
+
+const drivers = machineData ? machineData.drivers.join(" / ") : "-";
+
+const row=[sr++,drivers,machine];
+
+let pCount=0;
+
+days.forEach(d=>{
+
+const day=d.getDate();
+
+const status = (machineData && machineData.attendance[day]) ? "P" : "A";
+
+row.push(status);
+
+if(status==="P") pCount++;
+
+});
+
+row.push(pCount);
+
+rows.push(fillRow(row));
+
+});
+
+/* WRITE DATA */
+
+sh.getRange(1,1,rows.length,totalCols).setValues(rows);
+
+/* MERGE HEADER */
+
+sh.getRange(1,1,1,totalCols).merge();
+sh.getRange(2,1,1,totalCols).merge();
+sh.getRange(3,1,1,totalCols).merge();
+
+/* STYLE */
+
+sh.getRange(1,1)
+.setFontSize(14)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setBackground("#dbeafe");
+
+sh.getRange(2,1,2,totalCols)
+.setHorizontalAlignment("center")
+.setFontWeight("bold")
+.setBackground("#eef2ff");
+
+/* TABLE HEADER */
+
+sh.getRange(5,1,1,totalCols)
+.setFontWeight("bold")
+.setBackground("#c7d2fe")
+.setHorizontalAlignment("center");
+
+/* BORDERS */
+
+sh.getRange(5,1,rows.length-4,totalCols)
+.setBorder(true,true,true,true,true,true);
+
+/* ALIGN */
+
+sh.getRange(6,1,rows.length-5,totalCols)
+.setHorizontalAlignment("center");
+
+sh.getRange(6,2,rows.length-5,1)
+.setHorizontalAlignment("left");
+
+sh.getRange(6,3,rows.length-5,1)
+.setHorizontalAlignment("left");
+
+/* COLUMN WIDTH */
+
+sh.setColumnWidth(1,80);
+sh.setColumnWidth(2,220);
+sh.setColumnWidth(3,300);
+
+for(let i=4;i<=totalCols;i++){
+sh.setColumnWidth(i,80);
+}
+
+/* ZEBRA */
+
+for(let i=6;i<=rows.length;i++){
+if(i%2===0){
+sh.getRange(i,1,1,totalCols).setBackground("#f9fafb");
+}
+}
+
+/* FREEZE */
+
+sh.setFrozenRows(5);
+
+/* DOWNLOAD */
+
+const result = exportSpreadsheetToBase64(report.getId());
+
+
+
+return jsonSuccess(result);
+} finally {
+
+lock.releaseLock();
+
+}
+}
+function generatePendingAmountReportRange(subCode, from, to){
+const lock = LockService.getScriptLock();
+
+if (!lock.tryLock(30000)) {
+  throw new Error("Server busy. कृपया 20 सेकंदांनी पुन्हा प्रयत्न करा.");
+}
+
+try {
+const master = MASTER;
+const list = readSheet(master,"Subdivision List");
+
+/* =================================================
+   SUBDIVISION DETAILS
+================================================= */
+
+const row = list.find(
+r => String(r["Subdivision Code"]).trim().toLowerCase() ===
+String(subCode).trim().toLowerCase()
+);
+
+if(!row) throw new Error("Subdivision not found");
+
+const subName = row["Subdivision Name"];
+
+/* =================================================
+   MACHINE MASTER (RATE FROM MASTER SHEET)
+================================================= */
+
+const machineMaster = readSheet(master,"Subdivision Machines")
+.filter(r =>
+String(r["Subdivision Code"]).trim().toLowerCase() ===
+String(subCode).trim().toLowerCase()
+);
+
+const machines=[];
+const rateMap={};
+
+machineMaster.forEach(r=>{
+
+const name = r["Machine Name"];
+
+if(!machines.includes(name)){
+machines.push(name);
+}
+
+rateMap[name] = Number(r["Use Rate"] || 0);
+
+});
+
+/* =================================================
+   SUBDIVISION DATA
+================================================= */
+
+const subSS = SpreadsheetApp.openById(String(row["Data Sheet ID"]).trim());
+const sheet = subSS.getSheets()[0];
+
+const values = sheet.getDataRange().getValues();
+const headers = values.shift();
+
+/* COLUMN INDEX */
+
+const colDate    = headers.indexOf("दिनांक");
+const colMachine = headers.indexOf("मशीन");
+const colProject = headers.indexOf("प्रकल्पाचे नाव");
+const colHours   = headers.indexOf("Dashboard एकूण (तास/km)");
+
+/* =================================================
+   DATE FILTER
+================================================= */
+
+const data = values.filter(r=>{
+const d = new Date(r[colDate]);
+if(isNaN(d)) return false;
+return d>=from && d<=to;
+});
+
+if(data.length === 0){
+throw new Error("No data found in selected period");
+}
+
+/* =================================================
+   WEEK CALCULATION (MONDAY BASED)
+================================================= */
+
+function getWeekIndex(date){
+
+const start = new Date(from);   // month start
+
+// first Sunday of month
+const firstSunday = new Date(start);
+
+while(firstSunday.getDay() !== 0){
+firstSunday.setDate(firstSunday.getDate()+1);
+}
+
+// Week 1
+if(date <= firstSunday){
+return 0;
+}
+
+// बाकी weeks
+const diff = date - firstSunday;
+
+const week = Math.floor(diff/(7*24*60*60*1000)) + 1;
+
+return Math.min(4,week);
+
+}
+
+/* =================================================
+   PROJECT → MACHINE → WEEK HOURS MAP
+================================================= */
+
+const projectMap={};
+
+data.forEach(r=>{
+
+const proj = r[colProject] || "Other Projects";
+const mach = r[colMachine];
+const hrs  = Number(r[colHours] || 0);
+
+if(!mach || hrs<=0) return;
+
+if(!projectMap[proj]) projectMap[proj]={};
+
+if(!projectMap[proj][mach])
+projectMap[proj][mach]=[0,0,0,0,0];
+
+const d = new Date(r[colDate]);
+
+const week = getWeekIndex(d);
+
+projectMap[proj][mach][week]+=hrs;
+
+});
+if(Object.keys(projectMap).length === 0){
+throw new Error("No machine hours found in selected date range");
+}
+/* =================================================
+   CREATE REPORT
+================================================= */
+
+const report = SpreadsheetApp.openById(REPORT_ENGINE_ID);
+
+const sheets = report.getSheets();
+
+for (let i = sheets.length - 1; i > 0; i--) {
+  report.deleteSheet(sheets[i]);
+}
+
+sheets[0].clear();
+
+const sh = report.getSheets()[0];
+
+const rows=[];
+
+/* HEADER */
+
+rows.push(["मा. कार्यकारी अभियंता यांत्रिकी विभाग (को.प्र), अलोरे","","","","","","","","","",""]);
+rows.push(["यंत्रिकी उपविभाग : "+subName,"","","","","","","","","",""]);
+rows.push(["रिपोर्ट कालावधी : "+
+Utilities.formatDate(from,Session.getScriptTimeZone(),"dd-MM-yyyy")+
+" ते "+
+Utilities.formatDate(to,Session.getScriptTimeZone(),"dd-MM-yyyy"),"","","","","","","","","",""]);
+
+rows.push(new Array(11).fill(""));
+
+rows.push([
+"Sr",
+"Project Name",
+"Machine / Vehicle",
+"W1",
+"W2",
+"W3",
+"W4",
+"W5",
+"Total Hrs/Km",
+"Rate",
+"Amount"
+]);
+
+let sr=1;
+let grandTotal=0;
+
+/* =================================================
+   REPORT DATA
+================================================= */
+
+Object.keys(projectMap).sort().forEach(project=>{
+
+let subTotal=0;
+
+machines.forEach(machine=>{
+
+if(!projectMap[project][machine]) return;
+
+const w = projectMap[project][machine];
+
+const total = w.reduce((a,b)=>a+b,0);
+
+const rate = rateMap[machine] || 0;
+
+const amt = total * rate;
+
+subTotal += amt;
+grandTotal += amt;
+
+rows.push([
+sr++,
+project,
+machine,
+w[0].toFixed(2),
+w[1].toFixed(2),
+w[2].toFixed(2),
+w[3].toFixed(2),
+w[4].toFixed(2),
+total.toFixed(2),
+rate,
+amt.toFixed(2)
+]);
+
+});
+
+/* PROJECT SUB TOTAL */
+
+rows.push([
+"",
+"SUB TOTAL - "+project,
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+subTotal.toFixed(2)
+]);
+
+});
+
+/* GRAND TOTAL */
+
+rows.push([
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"GRAND TOTAL",
+grandTotal.toFixed(2)
+]);
+
+/* =================================================
+   WRITE DATA
+================================================= */
+
+if(rows.length === 0){
+throw new Error("No data available to generate Pending Amount Report");
+}
+
+sh.getRange(1,1,rows.length,11).setValues(rows);
+
+/* MERGE HEADER */
+
+sh.getRange(1,1,1,11).merge();
+sh.getRange(2,1,1,11).merge();
+sh.getRange(3,1,1,11).merge();
+
+/* HEADER STYLE */
+
+sh.getRange(1,1)
+.setFontSize(15)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setBackground("#dbeafe");
+
+sh.getRange(2,1,2,11)
+.setFontWeight("bold")
+.setHorizontalAlignment("center")
+.setBackground("#eef2ff");
+
+/* TABLE HEADER */
+
+sh.getRange(5,1,1,11)
+.setFontWeight("bold")
+.setBackground("#c7d2fe")
+.setHorizontalAlignment("center");
+
+/* BORDERS */
+
+sh.getRange(5,1,rows.length-4,11)
+.setBorder(true,true,true,true,true,true);
+
+/* COLUMN WIDTH */
+
+sh.setColumnWidth(1,70);
+sh.setColumnWidth(2,260);
+sh.setColumnWidth(3,320);
+
+for(let i=4;i<=11;i++){
+sh.setColumnWidth(i,110);
+}
+
+/* ALIGNMENT */
+
+sh.getRange(6,1,rows.length-5,11)
+.setHorizontalAlignment("center");
+
+sh.getRange(6,2,rows.length-5,2)
+.setHorizontalAlignment("left");
+
+/* TOTAL STYLE */
+
+sh.getRange(rows.length,10,1,2)
+.setFontWeight("bold")
+.setBackground("#fce5cd");
+
+/* ZEBRA ROWS */
+
+for(let i=6;i<=rows.length;i++){
+if(i%2===0){
+sh.getRange(i,1,1,11).setBackground("#f9fafb");
+}
+}
+
+/* FREEZE HEADER */
+
+sh.setFrozenRows(5);
+
+/* =================================================
+   DOWNLOAD LINK
+================================================= */
+
+const result = exportSpreadsheetToBase64(report.getId());
+
+
+
+return jsonSuccess(result);
+} finally {
+
+lock.releaseLock();
+
+}
+}
+function getFuelDashboardData(e){
+
+const subCode = e.parameter.subdivision;
+const from = new Date(e.parameter.from);
+const to = new Date(e.parameter.to);
+
+to.setHours(23,59,59,999);
+
+if(!subCode) throw new Error("Subdivision missing");
+if(isNaN(from) || isNaN(to)) throw new Error("Date range missing");
+
+const master = MASTER;
+
+/* subdivision sheet */
+
+const list = readSheet(master,"Subdivision List");
+
+const row = list.find(r =>
+String(r["Subdivision Code"]).trim() === String(subCode).trim()
+);
+
+if(!row) throw new Error("Subdivision not found");
+
+const subSS = SpreadsheetApp.openById(String(row["Data Sheet ID"]).trim());
+const sheet = subSS.getSheets()[0];
+
+const values = sheet.getDataRange().getValues();
+const headers = values.shift();
+
+/* column index */
+
+const colDate = headers.indexOf("दिनांक");
+const colMachine = headers.indexOf("मशीन");
+const colHours = headers.indexOf("Dashboard एकूण (तास/km)");
+const colDiesel = headers.indexOf("डिझेल (लिटर)");
+
+/* machine master */
+
+const machineMaster = readSheet(master,"Subdivision Machines")
+.filter(m =>
+String(m["Subdivision Code"]).trim() === String(subCode).trim()
+);
+
+/* machine stats */
+
+const stats = {};
+
+values.forEach(r=>{
+
+const d = new Date(r[colDate]);
+
+if(isNaN(d)) return;
+if(d < from || d > to) return;
+
+const machine = r[colMachine];
+const hrs = Number(r[colHours] || 0);
+const diesel = Number(r[colDiesel] || 0);
+
+if(!machine) return;
+
+if(!stats[machine]){
+stats[machine] = {hours:0,diesel:0};
+}
+
+stats[machine].hours += hrs;
+stats[machine].diesel += diesel;
+
+});
+
+/* result */
+
+const result=[];
+
+machineMaster.forEach(m=>{
+
+const name = m["Machine Name"];
+const cat = m["Category"];
+const expected = Number(m["Diesel Average"] || 0);
+
+const data = stats[name] || {hours:0,diesel:0};
+
+let actual = 0;
+
+if(cat==="Machine"){
+
+actual = data.hours ? data.diesel/data.hours : 0;
+
+}else{
+
+actual = data.diesel ? data.hours/data.diesel : 0;
+
+}
+
+result.push({
+
+machine:name,
+category:cat,
+expected:expected,
+actual:actual,
+hours:data.hours,
+diesel:data.diesel
+
+});
+
+});
+
+return result;
+
+}
+function authorizeDrive() {
+  const folder = DriveApp.getRootFolder();
+  Logger.log(folder.getName());
+}
+function giveDrivePermission(){
+  const folder = DriveApp.getRootFolder();
+  Logger.log(folder.getName());
+}
+function forceDriveAuth(){
+  const folder = DriveApp.getRootFolder();
+  Logger.log(folder.getName());
+}
+
+// ✅ हे नवीन फंक्शन इथे जोडा
+function resetAndGetPermissions() {
+  try {
+    DriveApp.getRootFolder();
+    Logger.log("✓ Drive परवानगी मिळाली");
+    
+    const ss = SpreadsheetApp.create("TempPermissionFile");
+    Logger.log("✓ Spreadsheet परवानगी मिळाली");
+    
+    const response = UrlFetchApp.fetch("https://www.google.com");
+    Logger.log("✓ UrlFetch परवानगी मिळाली");
+    
+    PropertiesService.getScriptProperties().setProperty("test", "value");
+    Logger.log("✓ Properties परवानगी मिळाली");
+    
+    DriveApp.getFileById(ss.getId()).setTrashed(true);
+    Logger.log("✓ तात्पुरती फाइल हटवली");
+    
+    Logger.log("सर्व परवानग्या यशस्वीरित्या मिळाल्या!");
+    return "सर्व परवानग्या मिळाल्या. आता नवीन Web App डिप्लॉय करा.";
+    
+  } catch (error) {
+    Logger.log("त्रुटी आली: " + error.message);
+    return "त्रुटी: " + error.message;
+  }
+}
