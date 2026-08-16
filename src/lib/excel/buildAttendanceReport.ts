@@ -13,6 +13,7 @@ export async function buildAttendanceReport(rows: Row[], subdivisionName: string
     { header: "Name", key: "name" },
     { header: "Role", key: "role" },
     { header: "Status", key: "status" },
+    { header: "Source", key: "source" },
     { header: "Remarks", key: "remarks" },
   ];
 
@@ -22,6 +23,7 @@ export async function buildAttendanceReport(rows: Row[], subdivisionName: string
       name: r.staff?.name ?? "",
       role: r.staff?.role ?? "",
       status: r.status,
+      source: r.source === "auto" ? "Auto (Form)" : "Manual",
       remarks: r.remarks ?? "",
     });
   });

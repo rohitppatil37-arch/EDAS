@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Loader2, Save, Users } from "lucide-react";
+import { CalendarDays, CheckCircle2, Info, Loader2, Save, Users } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/useAuth";
 import { useStaff } from "@/lib/queries/masterData";
 import { useAttendanceForDate, useUpsertAttendance } from "@/lib/queries/attendance";
-import type { AttendanceStatus, AttendanceUpsert } from "@/types/database";
+import type { Attendance, AttendanceStatus, AttendanceUpsert } from "@/types/database";
 
 const statusOptions: AttendanceStatus[] = ["Present", "Absent", "Half Day", "Leave"];
 
@@ -44,36 +45,51 @@ export function AttendanceEntryPage() {
 
   const subdivisionStaff = staff.filter((s) => s.subdivision_id === subdivisionId);
 
+  const existingMap = useMemo(() => {
+    const map: Record<string, Attendance> = {};
+    existing?.forEach((a) => {
+      map[a.staff_id] = a;
+    });
+    return map;
+  }, [existing]);
+
   const statusCounts = useMemo(() => {
     const counts: Record<AttendanceStatus, number> = { Present: 0, Absent: 0, "Half Day": 0, Leave: 0 };
+    let unmarked = 0;
     subdivisionStaff.forEach((s) => {
-      const status = statuses[s.id] ?? "Present";
-      counts[status]++;
+      const record = existingMap[s.id];
+      const status = record?.source === "auto" ? record.status : statuses[s.id];
+      if (status) counts[status]++;
+      else unmarked++;
     });
-    return counts;
-  }, [subdivisionStaff, statuses]);
+    return { counts, unmarked };
+  }, [subdivisionStaff, existingMap, statuses]);
 
   useEffect(() => {
     const map: Record<string, AttendanceStatus> = {};
-    subdivisionStaff.forEach((s) => {
-      map[s.id] = "Present";
-    });
     existing?.forEach((a) => {
-      map[a.staff_id] = a.status;
+      if (a.source === "manual") map[a.staff_id] = a.status;
     });
     setStatuses(map);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, existing, staff.length]);
+  }, [date, existing]);
 
   async function save() {
     if (!subdivisionId) return;
-    const rows: AttendanceUpsert[] = subdivisionStaff.map((s) => ({
-      subdivision_id: subdivisionId,
-      staff_id: s.id,
-      attendance_date: date,
-      status: statuses[s.id] ?? "Present",
-      remarks: null,
-    }));
+    const rows: AttendanceUpsert[] = subdivisionStaff
+      .filter((s) => existingMap[s.id]?.source !== "auto" && statuses[s.id])
+      .map((s) => ({
+        subdivision_id: subdivisionId,
+        staff_id: s.id,
+        attendance_date: date,
+        status: statuses[s.id],
+        source: "manual",
+        remarks: null,
+      }));
+
+    if (rows.length === 0) {
+      toast.error("कोणतीही नवीन नोंद निवडलेली नाही");
+      return;
+    }
 
     try {
       await upsert.mutateAsync(rows);
@@ -100,15 +116,30 @@ export function AttendanceEntryPage() {
         </CardContent>
       </Card>
 
+      <Alert className="mb-4">
+        <Info />
+        <AlertDescription>
+          ज्या चालक/ऑपरेटरने आज फॉर्म भरला आहे ते आपोआप "उपस्थित" म्हणून नोंदवले जातात. इतरांसाठी खालील यादीतून
+          स्थिती निवडा.
+        </AlertDescription>
+      </Alert>
+
       {subdivisionStaff.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2">
           {statusOptions.map((opt) => (
             <Badge key={opt} variant="outline" className="gap-1.5 py-1">
               <span className={`size-2 rounded-full ${statusDotColor[opt]}`} />
               {statusLabels[opt]}
-              <span className="font-bold">{statusCounts[opt]}</span>
+              <span className="font-bold">{statusCounts.counts[opt]}</span>
             </Badge>
           ))}
+          {statusCounts.unmarked > 0 && (
+            <Badge variant="outline" className="gap-1.5 py-1 text-muted-foreground">
+              <span className="size-2 rounded-full bg-border" />
+              अद्याप नोंद नाही
+              <span className="font-bold">{statusCounts.unmarked}</span>
+            </Badge>
+          )}
         </div>
       )}
 
@@ -121,31 +152,42 @@ export function AttendanceEntryPage() {
             </div>
           )}
           {subdivisionStaff.map((s) => {
-            const status = statuses[s.id] ?? "Present";
+            const record = existingMap[s.id];
+            const isAuto = record?.source === "auto";
+            const status = isAuto ? record.status : statuses[s.id];
             return (
               <div key={s.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className={`size-2 shrink-0 rounded-full ${statusDotColor[status]}`} />
+                  <span
+                    className={`size-2 shrink-0 rounded-full ${status ? statusDotColor[status] : "bg-border"}`}
+                  />
                   <div className="min-w-0">
                     <p className="truncate font-medium">{s.name}</p>
                     <p className="text-xs text-muted-foreground">{s.role}</p>
                   </div>
                 </div>
-                <Select
-                  value={status}
-                  onValueChange={(v) => setStatuses((prev) => ({ ...prev, [s.id]: v as AttendanceStatus }))}
-                >
-                  <SelectTrigger className="w-32 shrink-0 sm:w-36">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((opt) => (
-                      <SelectItem key={opt} value={opt}>
-                        {statusLabels[opt]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {isAuto ? (
+                  <Badge variant="secondary" className="shrink-0 gap-1.5">
+                    <CheckCircle2 className="size-3.5" />
+                    फॉर्मद्वारे उपस्थित
+                  </Badge>
+                ) : (
+                  <Select
+                    value={status ?? ""}
+                    onValueChange={(v) => setStatuses((prev) => ({ ...prev, [s.id]: v as AttendanceStatus }))}
+                  >
+                    <SelectTrigger className="w-32 shrink-0 sm:w-36">
+                      <SelectValue placeholder="स्थिती निवडा" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {statusLabels[opt]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             );
           })}

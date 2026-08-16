@@ -3,10 +3,14 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 
+const WelcomePage = lazy(() => import("@/pages/WelcomePage").then((m) => ({ default: m.WelcomePage })));
 const WorkLogEntryPage = lazy(() =>
   import("@/pages/WorkLogEntryPage").then((m) => ({ default: m.WorkLogEntryPage }))
 );
 const LoginPage = lazy(() => import("@/pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+const ProgressDashboardPage = lazy(() =>
+  import("@/pages/ProgressDashboardPage").then((m) => ({ default: m.ProgressDashboardPage }))
+);
 const FuelDashboardPage = lazy(() =>
   import("@/pages/FuelDashboardPage").then((m) => ({ default: m.FuelDashboardPage }))
 );
@@ -22,6 +26,9 @@ const PendingPaymentsPage = lazy(() =>
 const GpsLogEntryPage = lazy(() =>
   import("@/pages/GpsLogEntryPage").then((m) => ({ default: m.GpsLogEntryPage }))
 );
+const MachineCapacityPage = lazy(() =>
+  import("@/pages/MachineCapacityPage").then((m) => ({ default: m.MachineCapacityPage }))
+);
 
 function PageFallback() {
   return <div className="p-10 text-center text-muted-foreground">लोड होत आहे...</div>;
@@ -33,14 +40,17 @@ export default function App() {
       <Toaster position="top-center" richColors />
       <Suspense fallback={<PageFallback />}>
         <Routes>
-          <Route path="/" element={<WorkLogEntryPage />} />
+          <Route path="/" element={<WelcomePage />} />
+          <Route path="/form" element={<WorkLogEntryPage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/dashboard" element={<FuelDashboardPage />} />
+          <Route path="/dashboard" element={<ProgressDashboardPage />} />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboardPage />} />
             <Route path="attendance" element={<AttendanceEntryPage />} />
             <Route path="pending" element={<PendingPaymentsPage />} />
             <Route path="gps" element={<GpsLogEntryPage />} />
+            <Route path="machines" element={<MachineCapacityPage />} />
+            <Route path="fuel-dashboard" element={<FuelDashboardPage />} />
           </Route>
         </Routes>
       </Suspense>

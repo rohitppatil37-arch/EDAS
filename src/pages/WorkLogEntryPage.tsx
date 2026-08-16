@@ -10,10 +10,10 @@ import {
   Clock,
   Fuel,
   Gauge,
+  Home,
   LayoutDashboard,
   Loader2,
   RotateCcw,
-  ShieldCheck,
   Timer,
   Truck,
   Wrench,
@@ -29,7 +29,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSubdivisions, useMachines, useStaff, useProjects } from "@/lib/queries/masterData";
-import { useSubmitWorkLog } from "@/lib/queries/workLogs";
+import { fetchPreviousReading, useSubmitWorkLog } from "@/lib/queries/workLogs";
 import {
   workLogSchema,
   calcTotalReading,
@@ -219,6 +219,17 @@ export function WorkLogEntryPage() {
     const end = Number(data.endReading);
     const total = end - start;
     const diesel = Number(data.dieselQty);
+
+    try {
+      const prevReading = await fetchPreviousReading(data.machineId, data.workDate);
+      if (prevReading != null && Math.abs(start - prevReading) > 0.001) {
+        toast.error('रिडींग जुळत नाही! कृपया "काम सुरू करतानाचे डॅशबोर्ड रिडींग" पुन्हा तपासा.');
+        return;
+      }
+    } catch {
+      toast.error("मागील रिडींग तपासताना समस्या आली. पुन्हा प्रयत्न करा.");
+      return;
+    }
 
     let remark = "✅ काम झाले";
     if (total === 0 && diesel === 0) remark = "🚫 काम झाले नाही";
@@ -513,18 +524,14 @@ export function WorkLogEntryPage() {
         <Separator className="my-6" />
 
         <div className="grid grid-cols-2 gap-3">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => navigate("/dashboard")}
-          >
+          <Button type="button" variant="secondary" onClick={() => navigate("/dashboard")}>
             <LayoutDashboard className="size-4" />
             Dashboard
           </Button>
 
-          <Button type="button" variant="outline" onClick={() => navigate("/login")}>
-            <ShieldCheck className="size-4" />
-            Admin Login
+          <Button type="button" variant="outline" onClick={() => navigate("/")}>
+            <Home className="size-4" />
+            मुख्य पृष्ठ
           </Button>
         </div>
       </form>

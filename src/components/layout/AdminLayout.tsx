@@ -1,6 +1,16 @@
 import { Suspense, useState } from "react";
-import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
-import { BarChart3, ClipboardCheck, LogOut, MapPin, Wallet } from "lucide-react";
+import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  BarChart3,
+  ClipboardCheck,
+  ClipboardEdit,
+  Fuel,
+  Gauge,
+  Home,
+  LogOut,
+  MapPin,
+  Wallet,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -22,6 +32,14 @@ const navItems = [
   { to: "/admin/attendance", label: "हजेरी", shortLabel: "हजेरी", icon: ClipboardCheck },
   { to: "/admin/pending", label: "प्रलंबित रक्कम", shortLabel: "रक्कम", icon: Wallet },
   { to: "/admin/gps", label: "GPS", shortLabel: "GPS", icon: MapPin },
+  { to: "/admin/machines", label: "सयंत्र क्षमता", shortLabel: "क्षमता", icon: Gauge },
+  { to: "/admin/fuel-dashboard", label: "इंधन डॅशबोर्ड", shortLabel: "इंधन", icon: Fuel },
+];
+
+const quickLinks = [
+  { to: "/", label: "मुख्य पृष्ठ", icon: Home },
+  { to: "/form", label: "फॉर्म भरा", icon: ClipboardEdit },
+  { to: "/dashboard", label: "प्रगती डॅशबोर्ड", icon: BarChart3 },
 ];
 
 export function AdminLayout() {
@@ -51,7 +69,7 @@ export function AdminLayout() {
   return (
     <div className="min-h-dvh bg-background md:flex">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:border-r md:bg-card">
+      <aside className="hidden md:sticky md:top-0 md:flex md:h-dvh md:w-64 md:shrink-0 md:flex-col md:self-start md:border-r md:bg-card">
         <div className="flex items-center gap-2.5 border-b px-5 py-4">
           <img src="/main-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
           <div className="min-w-0">
@@ -65,7 +83,7 @@ export function AdminLayout() {
           <p className="text-sm font-semibold text-foreground">{subdivisionLabel}</p>
         </div>
 
-        <nav className="flex-1 space-y-1 px-3 py-4">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -85,6 +103,22 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        <div className="border-t px-3 py-3">
+          <p className="mb-1.5 px-3 text-xs font-medium text-muted-foreground">इतर पेजेस</p>
+          <div className="space-y-1">
+            {quickLinks.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <item.icon className="size-4 shrink-0" />
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
 
         <div className="border-t p-3">
           <Button
@@ -109,15 +143,22 @@ export function AdminLayout() {
             </div>
           </div>
           <h1 className="hidden text-lg font-bold text-foreground md:block">{currentTitle}</h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive md:hidden"
-            onClick={() => setLogoutOpen(true)}
-            aria-label="लॉगआउट"
-          >
-            <LogOut className="size-5" />
-          </Button>
+          <div className="flex items-center gap-1 md:hidden">
+            <Button variant="ghost" size="icon" asChild aria-label="मुख्य पृष्ठ">
+              <Link to="/">
+                <Home className="size-5" />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setLogoutOpen(true)}
+              aria-label="लॉगआउट"
+            >
+              <LogOut className="size-5" />
+            </Button>
+          </div>
         </header>
 
         <main className="flex-1 px-4 py-5 pb-24 md:px-6 md:py-6 md:pb-6">
@@ -133,7 +174,7 @@ export function AdminLayout() {
 
       {/* Mobile bottom tab bar */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-6">
           {navItems.map((item) => (
             <NavLink
               key={item.to}

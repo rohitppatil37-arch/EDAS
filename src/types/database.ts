@@ -37,6 +37,7 @@ export interface Machine {
   machine_name: string;
   category: MachineCategory;
   expected_efficiency: number | null;
+  capacity: number | null;
   active: boolean;
   created_at: string;
 }
@@ -93,6 +94,7 @@ export interface GpsLog {
 export type GpsLogInsert = Omit<GpsLog, "id" | "created_at" | "created_by">;
 
 export type AttendanceStatus = "Present" | "Absent" | "Half Day" | "Leave";
+export type AttendanceSource = "manual" | "auto";
 
 export interface Attendance {
   id: string;
@@ -100,6 +102,7 @@ export interface Attendance {
   staff_id: string;
   attendance_date: string;
   status: AttendanceStatus;
+  source: AttendanceSource;
   remarks: string | null;
   created_by: string | null;
   created_at: string;
@@ -133,4 +136,12 @@ export interface FuelPerformanceRow {
   actual: number;
   hours: number;
   diesel: number;
+}
+
+export interface MachineEarthworkProgressRow {
+  machine_id: string;
+  machine_name: string;
+  capacity: number | null;
+  total_trips: number;
+  total_hours: number;
 }

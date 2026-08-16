@@ -13,7 +13,6 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { GovHeader } from "@/components/layout/GovHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -109,9 +108,7 @@ export function FuelDashboardPage() {
   const noDataFound = hasSearched && !row;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-10">
-      <GovHeader title="इंधन कार्यक्षमता डॅशबोर्ड" showSubtitle={false} />
-
+    <>
       <div className="mb-5 flex items-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-primary">
         <Filter className="size-4 shrink-0" />
         उपविभाग, सयंत्र व दिनांक निवडून इंधन कार्यक्षमता विश्लेषण पहा.
@@ -124,7 +121,7 @@ export function FuelDashboardPage() {
             फिल्टर
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-6 lg:items-end">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end">
           <div className="space-y-1.5">
             <Label>उपविभाग</Label>
             <Select
@@ -291,6 +288,6 @@ export function FuelDashboardPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }
