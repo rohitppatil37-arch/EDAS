@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSubdivisions, useProjects } from "@/lib/queries/masterData";
-import { useMachineEarthworkProgress, useSiteDieselTotal } from "@/lib/queries/earthworkProgress";
-import type { MachineEarthworkProgressRow } from "@/types/database";
+import { useMachineDieselTotal, useMachineEarthworkProgress } from "@/lib/queries/earthworkProgress";
+import type { MachineDieselRow, MachineEarthworkProgressRow } from "@/types/database";
 
 function monthStart() {
   const d = new Date();
@@ -31,34 +31,44 @@ function volumeFmt(n: number) {
   return `${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })} घ.मी.`;
 }
 
+function dieselFmt(n: number) {
+  return `${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })} लिटर`;
+}
+
 function truncateLabel(s: string, max = 16) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-interface ChartDatum {
+// Generic "one metric per named machine" horizontal bar chart — used for both the
+// earthwork-volume sections (Tipper/Excavator) and the diesel-per-machine section,
+// since they're the same shape: a single magnitude compared across named categories.
+interface MetricChartDatum {
   name: string;
-  volume: number;
-  quantity: number;
-  capacity: number | null;
-  quantityLabel: string;
-  unitSuffix: string;
+  value: number;
+  detail: string;
 }
 
-function VolumeTooltip({ active, payload }: { active?: boolean; payload?: { payload: ChartDatum }[] }) {
+function MetricTooltip({
+  active,
+  payload,
+  valueFmt,
+}: {
+  active?: boolean;
+  payload?: { payload: MetricChartDatum }[];
+  valueFmt?: (n: number) => string;
+}) {
   if (!active || !payload || payload.length === 0) return null;
   const d = payload[0].payload;
   return (
     <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
       <p className="mb-1 font-semibold text-popover-foreground">{d.name}</p>
-      <p className="text-muted-foreground">
-        {d.quantityLabel}: {d.quantity} {d.unitSuffix} · क्षमता: {d.capacity ?? "-"}
-      </p>
-      <p className="font-semibold text-primary">{volumeFmt(d.volume)}</p>
+      <p className="text-muted-foreground">{d.detail}</p>
+      <p className="font-semibold text-primary">{valueFmt ? valueFmt(d.value) : d.value}</p>
     </div>
   );
 }
 
-function VolumeBarChart({ data }: { data: ChartDatum[] }) {
+function MetricBarChart({ data, valueFmt }: { data: MetricChartDatum[]; valueFmt: (n: number) => string }) {
   const height = data.length * 40 + 24;
   return (
     <div style={{ height }} className="w-full">
@@ -80,10 +90,10 @@ function VolumeBarChart({ data }: { data: ChartDatum[] }) {
             axisLine={false}
             tickLine={false}
           />
-          <Tooltip content={<VolumeTooltip />} cursor={{ fill: "var(--color-accent)" }} />
-          <Bar dataKey="volume" fill="var(--color-primary)" radius={[0, 4, 4, 0]} barSize={18}>
+          <Tooltip content={<MetricTooltip valueFmt={valueFmt} />} cursor={{ fill: "var(--color-accent)" }} />
+          <Bar dataKey="value" fill="var(--color-primary)" radius={[0, 4, 4, 0]} barSize={18}>
             <LabelList
-              dataKey="volume"
+              dataKey="value"
               position="right"
               formatter={(v: unknown) => (typeof v === "number" ? v.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "")}
               style={{ fontSize: 11, fill: "var(--color-foreground)" }}
@@ -122,13 +132,10 @@ function ProgressSection({
       filtered
         .map((r) => ({
           name: r.machine_name,
-          volume: quantityOf(r) * (r.capacity ?? 0),
-          quantity: quantityOf(r),
-          capacity: r.capacity,
-          quantityLabel,
-          unitSuffix,
+          value: quantityOf(r) * (r.capacity ?? 0),
+          detail: `${quantityLabel}: ${quantityOf(r)} ${unitSuffix} · क्षमता: ${r.capacity ?? "-"}`,
         }))
-        .sort((a, b) => b.volume - a.volume),
+        .sort((a, b) => b.value - a.value),
     [filtered, quantityOf, quantityLabel, unitSuffix]
   );
 
@@ -177,7 +184,7 @@ function ProgressSection({
               </p>
             )}
 
-            {chartData.length > 1 && <VolumeBarChart data={chartData} />}
+            {chartData.length > 1 && <MetricBarChart data={chartData} valueFmt={volumeFmt} />}
 
             <details className="group">
               <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
@@ -194,6 +201,88 @@ function ProgressSection({
                       <span className="shrink-0 font-semibold text-primary">
                         {volumeFmt(quantityOf(r) * (r.capacity ?? 0))}
                       </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DieselSection({ rows }: { rows: MachineDieselRow[] }) {
+  const [filterId, setFilterId] = useState("");
+  const filtered = filterId ? rows.filter((r) => r.machine_id === filterId) : rows;
+  const totalDiesel = filtered.reduce((sum, r) => sum + r.total_diesel, 0);
+
+  const chartData = useMemo(
+    () =>
+      filtered
+        .map((r) => ({
+          name: r.machine_name,
+          value: r.total_diesel,
+          detail: r.category === "Vehicle" ? "वाहन" : "मशीन",
+        }))
+        .sort((a, b) => b.value - a.value),
+    [filtered]
+  );
+
+  useEffect(() => {
+    setFilterId("");
+  }, [rows]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-primary">
+          <Fuel className="size-4.5" />
+          घेतलेले डिझेल
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {rows.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            या कालावधीत या प्रकल्पावर डिझेलची नोंद आढळली नाही.
+          </p>
+        ) : (
+          <>
+            {rows.length > 1 && (
+              <Select value={filterId || "all"} onValueChange={(v) => setFilterId(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">सर्व ({rows.length})</SelectItem>
+                  {rows.map((r) => (
+                    <SelectItem key={r.machine_id} value={r.machine_id}>
+                      {r.machine_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            <div className="rounded-lg border bg-accent/60 px-4 py-3 text-center">
+              <p className="text-xs font-medium text-muted-foreground">या प्रकल्पासाठी एकूण डिझेल</p>
+              <p className="mt-1 text-2xl font-bold text-primary">{dieselFmt(totalDiesel)}</p>
+            </div>
+
+            {chartData.length > 1 && <MetricBarChart data={chartData} valueFmt={dieselFmt} />}
+
+            <details className="group">
+              <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                तपशीलवार यादी पहा ({filtered.length})
+              </summary>
+              <div className="mt-2 space-y-2">
+                {filtered.map((r) => (
+                  <div key={r.machine_id} className="rounded-lg border p-3 text-sm">
+                    <p className="text-balance font-medium leading-snug">{r.machine_name}</p>
+                    <div className="mt-1.5 flex items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">{r.category === "Vehicle" ? "वाहन" : "मशीन"}</p>
+                      <span className="shrink-0 font-semibold text-primary">{dieselFmt(r.total_diesel)}</span>
                     </div>
                   </div>
                 ))}
@@ -257,7 +346,7 @@ export function ProgressDashboardPage() {
     to,
     enabled: queryEnabled,
   });
-  const dieselQuery = useSiteDieselTotal({ projectId, from, to, enabled: queryEnabled });
+  const dieselQuery = useMachineDieselTotal({ projectId, from, to, enabled: queryEnabled });
 
   const hasResults = queryEnabled && !!projectId;
 
@@ -349,22 +438,7 @@ export function ProgressDashboardPage() {
             emptyText="या कालावधीत या प्रकल्पावर सयंत्राची नोंद आढळली नाही."
           />
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-primary">
-                <Fuel className="size-4.5" />
-                घेतलेले डिझेल
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-lg border bg-accent/60 px-4 py-3 text-center">
-                <p className="text-xs font-medium text-muted-foreground">या प्रकल्पासाठी एकूण डिझेल</p>
-                <p className="mt-1 text-2xl font-bold text-primary">
-                  {(dieselQuery.data ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} लिटर
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <DieselSection rows={dieselQuery.data ?? []} />
         </>
       )}
     </div>

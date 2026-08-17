@@ -165,3 +165,10 @@ export interface MachineEarthworkProgressRow {
   total_trips: number;
   total_hours: number;
 }
+
+export interface MachineDieselRow {
+  machine_id: string;
+  machine_name: string;
+  category: MachineCategory;
+  total_diesel: number;
+}

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabaseClient";
-import type { MachineCategory, MachineEarthworkProgressRow } from "@/types/database";
+import type { MachineCategory, MachineDieselRow, MachineEarthworkProgressRow } from "@/types/database";
 
 export function useMachineEarthworkProgress(params: {
   projectId: string | null;
@@ -34,23 +34,23 @@ export function useMachineEarthworkProgress(params: {
   });
 }
 
-export function useSiteDieselTotal(params: {
+export function useMachineDieselTotal(params: {
   projectId: string | null;
   from: string;
   to: string;
   enabled: boolean;
 }) {
   return useQuery({
-    queryKey: ["site_diesel_total", params.projectId, params.from, params.to],
+    queryKey: ["machine_diesel_total", params.projectId, params.from, params.to],
     enabled: params.enabled && !!params.projectId,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("site_diesel_total", {
+      const { data, error } = await supabase.rpc("machine_diesel_total", {
         p_project: params.projectId,
         p_from: params.from,
         p_to: params.to,
       });
       if (error) throw error;
-      return data as number;
+      return data as MachineDieselRow[];
     },
   });
 }
