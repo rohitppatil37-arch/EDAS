@@ -52,6 +52,8 @@ export interface Project {
   created_at: string;
 }
 
+export type WorkLogStatus = "pending" | "approved" | "rejected";
+
 export interface WorkLog {
   id: string;
   subdivision_id: string;
@@ -74,10 +76,17 @@ export interface WorkLog {
   trip_count: number | null;
   location_from_to: string | null;
   remark: string | null;
+  status: WorkLogStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
   created_at: string;
 }
 
-export type WorkLogInsert = Omit<WorkLog, "id" | "total_reading" | "created_at">;
+export type WorkLogInsert = Omit<
+  WorkLog,
+  "id" | "total_reading" | "created_at" | "status" | "reviewed_by" | "reviewed_at" | "review_note"
+>;
 
 export interface GpsReading {
   id: string;

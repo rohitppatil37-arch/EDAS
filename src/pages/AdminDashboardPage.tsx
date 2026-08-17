@@ -80,6 +80,7 @@ export function AdminDashboardPage() {
         .from("work_logs")
         .select("*, machines(machine_name, machine_type, category), staff(name), projects(project_name, work_type)")
         .eq("subdivision_id", subdivisionId)
+        .eq("status", "approved")
         .gte("work_date", from)
         .lte("work_date", to)
         .order("work_date");

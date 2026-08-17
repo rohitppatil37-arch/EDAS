@@ -7,13 +7,8 @@ export function useSubmitWorkLog() {
     mutationFn: async (log: WorkLogInsert) => {
       const { error } = await supabase.from("work_logs").insert(log);
       if (error) throw error;
-
-      const { error: attendanceError } = await supabase.rpc("mark_attendance_present", {
-        p_subdivision: log.subdivision_id,
-        p_staff: log.staff_id,
-        p_date: log.work_date,
-      });
-      if (attendanceError) console.error("Attendance auto-mark failed:", attendanceError);
+      // Attendance is auto-marked once an admin approves this entry, not at submission —
+      // see useApproveWorkLog in workLogValidation.ts.
     },
   });
 }

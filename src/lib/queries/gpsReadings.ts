@@ -16,6 +16,7 @@ export function useWorkLogDatesForMachine(params: {
         .from("work_logs")
         .select("work_date")
         .eq("machine_id", params.machineId)
+        .eq("status", "approved")
         .gte("work_date", params.from)
         .lte("work_date", params.to)
         .order("work_date");

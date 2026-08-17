@@ -7,12 +7,14 @@ import {
   Fuel,
   Gauge,
   Home,
+  ListChecks,
   LogOut,
   MapPin,
   Wallet,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabaseClient";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -25,10 +27,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useSubdivisions } from "@/lib/queries/masterData";
+import { usePendingWorkLogCount } from "@/lib/queries/workLogValidation";
 import { cn } from "@/lib/utils";
+
+const VALIDATION_PATH = "/admin/validation";
 
 const navItems = [
   { to: "/admin", label: "रिपोर्ट", shortLabel: "रिपोर्ट", icon: BarChart3, end: true },
+  { to: VALIDATION_PATH, label: "पडताळणी", shortLabel: "पडताळणी", icon: ListChecks },
   { to: "/admin/attendance", label: "हजेरी", shortLabel: "हजेरी", icon: ClipboardCheck },
   { to: "/admin/pending", label: "प्रलंबित रक्कम", shortLabel: "रक्कम", icon: Wallet },
   { to: "/admin/gps", label: "GPS", shortLabel: "GPS", icon: MapPin },
@@ -45,6 +51,7 @@ const quickLinks = [
 export function AdminLayout() {
   const { session, profile, loading } = useAuth();
   const { data: subdivisions } = useSubdivisions();
+  const { data: pendingCount = 0 } = usePendingWorkLogCount(profile?.subdivision_id ?? null);
   const location = useLocation();
   const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -100,6 +107,11 @@ export function AdminLayout() {
             >
               <item.icon className="size-4.5 shrink-0" />
               {item.label}
+              {item.to === VALIDATION_PATH && pendingCount > 0 && (
+                <Badge variant="destructive" className="ml-auto">
+                  {pendingCount}
+                </Badge>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -173,8 +185,8 @@ export function AdminLayout() {
       </div>
 
       {/* Mobile bottom tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
-        <div className="grid grid-cols-6">
+      <nav className="fixed inset-x-0 bottom-0 z-40 overflow-x-auto border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
+        <div className="grid grid-cols-7 min-w-[560px]">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -187,7 +199,14 @@ export function AdminLayout() {
                 )
               }
             >
-              <item.icon className="size-5" />
+              <span className="relative">
+                <item.icon className="size-5" />
+                {item.to === VALIDATION_PATH && pendingCount > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex size-3.5 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
+                    {pendingCount > 9 ? "9+" : pendingCount}
+                  </span>
+                )}
+              </span>
               {item.shortLabel}
             </NavLink>
           ))}

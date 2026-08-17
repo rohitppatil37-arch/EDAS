@@ -29,6 +29,9 @@ const GpsReadingEntryPage = lazy(() =>
 const MachineCapacityPage = lazy(() =>
   import("@/pages/MachineCapacityPage").then((m) => ({ default: m.MachineCapacityPage }))
 );
+const WorkLogValidationPage = lazy(() =>
+  import("@/pages/WorkLogValidationPage").then((m) => ({ default: m.WorkLogValidationPage }))
+);
 
 function PageFallback() {
   return <div className="p-10 text-center text-muted-foreground">लोड होत आहे...</div>;
@@ -46,6 +49,7 @@ export default function App() {
           <Route path="/dashboard" element={<ProgressDashboardPage />} />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboardPage />} />
+            <Route path="validation" element={<WorkLogValidationPage />} />
             <Route path="attendance" element={<AttendanceEntryPage />} />
             <Route path="pending" element={<PendingPaymentsPage />} />
             <Route path="gps" element={<GpsReadingEntryPage />} />
