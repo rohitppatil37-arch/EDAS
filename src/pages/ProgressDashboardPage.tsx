@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle, Filter, Fuel, Gauge, SlidersHorizontal, Truck } from "lucide-react";
 import { GovHeader } from "@/components/layout/GovHeader";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,70 @@ function volumeFmt(n: number) {
   return `${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })} घ.मी.`;
 }
 
+function truncateLabel(s: string, max = 16) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+interface ChartDatum {
+  name: string;
+  volume: number;
+  quantity: number;
+  capacity: number | null;
+  quantityLabel: string;
+  unitSuffix: string;
+}
+
+function VolumeTooltip({ active, payload }: { active?: boolean; payload?: { payload: ChartDatum }[] }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
+      <p className="mb-1 font-semibold text-popover-foreground">{d.name}</p>
+      <p className="text-muted-foreground">
+        {d.quantityLabel}: {d.quantity} {d.unitSuffix} · क्षमता: {d.capacity ?? "-"}
+      </p>
+      <p className="font-semibold text-primary">{volumeFmt(d.volume)}</p>
+    </div>
+  );
+}
+
+function VolumeBarChart({ data }: { data: ChartDatum[] }) {
+  const height = data.length * 40 + 24;
+  return (
+    <div style={{ height }} className="w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 44, left: 4, bottom: 4 }}>
+          <CartesianGrid horizontal={false} stroke="var(--color-border)" />
+          <XAxis
+            type="number"
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
+            axisLine={{ stroke: "var(--color-border)" }}
+            tickLine={false}
+          />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={112}
+            tickFormatter={(v: string) => truncateLabel(v)}
+            tick={{ fontSize: 11, fill: "var(--color-foreground)" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip content={<VolumeTooltip />} cursor={{ fill: "var(--color-accent)" }} />
+          <Bar dataKey="volume" fill="var(--color-primary)" radius={[0, 4, 4, 0]} barSize={18}>
+            <LabelList
+              dataKey="volume"
+              position="right"
+              formatter={(v: unknown) => (typeof v === "number" ? v.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "")}
+              style={{ fontSize: 11, fill: "var(--color-foreground)" }}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function ProgressSection({
   icon: Icon,
   title,
@@ -51,6 +116,21 @@ function ProgressSection({
   const filtered = filterId ? rows.filter((r) => r.machine_id === filterId) : rows;
   const totalVolume = filtered.reduce((sum, r) => sum + quantityOf(r) * (r.capacity ?? 0), 0);
   const missingCapacity = filtered.some((r) => r.capacity == null && quantityOf(r) > 0);
+
+  const chartData = useMemo(
+    () =>
+      filtered
+        .map((r) => ({
+          name: r.machine_name,
+          volume: quantityOf(r) * (r.capacity ?? 0),
+          quantity: quantityOf(r),
+          capacity: r.capacity,
+          quantityLabel,
+          unitSuffix,
+        }))
+        .sort((a, b) => b.volume - a.volume),
+    [filtered, quantityOf, quantityLabel, unitSuffix]
+  );
 
   useEffect(() => {
     setFilterId("");
@@ -97,21 +177,28 @@ function ProgressSection({
               </p>
             )}
 
-            <div className="space-y-2">
-              {filtered.map((r) => (
-                <div key={r.machine_id} className="rounded-lg border p-3 text-sm">
-                  <p className="text-balance font-medium leading-snug">{r.machine_name}</p>
-                  <div className="mt-1.5 flex items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">
-                      {quantityLabel}: {quantityOf(r)} {unitSuffix} · क्षमता: {r.capacity ?? "-"}
-                    </p>
-                    <span className="shrink-0 font-semibold text-primary">
-                      {volumeFmt(quantityOf(r) * (r.capacity ?? 0))}
-                    </span>
+            {chartData.length > 1 && <VolumeBarChart data={chartData} />}
+
+            <details className="group">
+              <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                तपशीलवार यादी पहा ({filtered.length})
+              </summary>
+              <div className="mt-2 space-y-2">
+                {filtered.map((r) => (
+                  <div key={r.machine_id} className="rounded-lg border p-3 text-sm">
+                    <p className="text-balance font-medium leading-snug">{r.machine_name}</p>
+                    <div className="mt-1.5 flex items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        {quantityLabel}: {quantityOf(r)} {unitSuffix} · क्षमता: {r.capacity ?? "-"}
+                      </p>
+                      <span className="shrink-0 font-semibold text-primary">
+                        {volumeFmt(quantityOf(r) * (r.capacity ?? 0))}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </details>
           </>
         )}
       </CardContent>
