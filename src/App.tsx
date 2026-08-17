@@ -32,6 +32,9 @@ const MachineCapacityPage = lazy(() =>
 const WorkLogValidationPage = lazy(() =>
   import("@/pages/WorkLogValidationPage").then((m) => ({ default: m.WorkLogValidationPage }))
 );
+const MachineDeploymentPage = lazy(() =>
+  import("@/pages/MachineDeploymentPage").then((m) => ({ default: m.MachineDeploymentPage }))
+);
 
 function PageFallback() {
   return <div className="p-10 text-center text-muted-foreground">लोड होत आहे...</div>;
@@ -50,6 +53,7 @@ export default function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboardPage />} />
             <Route path="validation" element={<WorkLogValidationPage />} />
+            <Route path="deployments" element={<MachineDeploymentPage />} />
             <Route path="attendance" element={<AttendanceEntryPage />} />
             <Route path="pending" element={<PendingPaymentsPage />} />
             <Route path="gps" element={<GpsReadingEntryPage />} />

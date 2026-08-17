@@ -135,6 +135,19 @@ export interface PendingPayment {
 
 export type PendingPaymentInsert = Omit<PendingPayment, "id" | "created_at" | "created_by">;
 
+export interface MachineDeployment {
+  id: string;
+  machine_id: string;
+  subdivision_id: string;
+  project_id: string;
+  start_date: string;
+  end_date: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type MachineDeploymentInsert = Omit<MachineDeployment, "id" | "created_by" | "created_at">;
+
 export interface FuelPerformanceRow {
   machine_id: string;
   machine: string;

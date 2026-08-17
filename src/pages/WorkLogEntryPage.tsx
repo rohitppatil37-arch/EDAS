@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -30,6 +31,10 @@ import { Separator } from "@/components/ui/separator";
 import { useSubdivisions, useMachines, useStaff, useProjects } from "@/lib/queries/masterData";
 import { fetchPreviousReading, useSubmitWorkLog } from "@/lib/queries/workLogs";
 import {
+  useActiveDeploymentForMachine,
+  useDeploymentsForSubdivisionDate,
+} from "@/lib/queries/machineDeployments";
+import {
   workLogSchema,
   calcTotalReading,
   calcShiftHours,
@@ -43,6 +48,11 @@ function unique(arr: string[]) {
 
 function todayIso() {
   return new Date().toISOString().split("T")[0];
+}
+
+function fmtDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${d}-${m}-${y}`;
 }
 
 const emptyValues: WorkLogFormValues = {
@@ -119,6 +129,7 @@ export function WorkLogEntryPage() {
     defaultValues: emptyValues,
   });
 
+  const workDate = watch("workDate");
   const subdivisionId = watch("subdivisionId");
   const workType = watch("workType");
   const machineType = watch("machineType");
@@ -148,23 +159,42 @@ export function WorkLogEntryPage() {
     [projects, subdivisionId, workType]
   );
 
+  const { data: incomingDeployments = [] } = useDeploymentsForSubdivisionDate(subdivisionId, workDate);
+  const deployedInMachineIds = useMemo(
+    () => new Set(incomingDeployments.map((d) => d.machine_id)),
+    [incomingDeployments]
+  );
+
   const machineTypeOptions = useMemo(
     () =>
-      unique(machines.filter((m) => m.subdivision_id === subdivisionId).map((m) => m.machine_type)).map(
-        (t) => ({ value: t, label: t })
-      ),
-    [machines, subdivisionId]
+      unique(
+        machines
+          .filter((m) => m.subdivision_id === subdivisionId || deployedInMachineIds.has(m.id))
+          .map((m) => m.machine_type)
+      ).map((t) => ({ value: t, label: t })),
+    [machines, subdivisionId, deployedInMachineIds]
   );
 
   const machineOptions = useMemo(
     () =>
       machines
-        .filter((m) => m.subdivision_id === subdivisionId && m.machine_type === machineType)
-        .map((m) => ({ value: m.id, label: m.machine_name })),
-    [machines, subdivisionId, machineType]
+        .filter(
+          (m) =>
+            (m.subdivision_id === subdivisionId || deployedInMachineIds.has(m.id)) &&
+            m.machine_type === machineType
+        )
+        .map((m) => ({
+          value: m.id,
+          label:
+            m.subdivision_id !== subdivisionId && deployedInMachineIds.has(m.id)
+              ? `${m.machine_name} (नियुक्त)`
+              : m.machine_name,
+        })),
+    [machines, subdivisionId, machineType, deployedInMachineIds]
   );
 
   const selectedMachine = useMemo(() => machines.find((m) => m.id === machineId), [machines, machineId]);
+  const { data: activeDeployment } = useActiveDeploymentForMachine(machineId, workDate);
 
   const staffOptions = useMemo(() => {
     if (!selectedMachine) return [];
@@ -354,6 +384,17 @@ export function WorkLogEntryPage() {
                 </Badge>
               )}
             </div>
+
+            {activeDeployment && (
+              <Alert className="border-primary/40 bg-primary/5 [&>svg]:text-primary">
+                <ArrowRightLeft />
+                <AlertDescription className="font-medium text-foreground">
+                  हे सयंत्र सध्या <strong>{activeDeployment.projects?.project_name ?? "-"}</strong> (
+                  {activeDeployment.subdivisions?.name ?? "-"}) या प्रकल्पासाठी नियुक्त आहे (
+                  {fmtDate(activeDeployment.start_date)} – {fmtDate(activeDeployment.end_date)}).
+                </AlertDescription>
+              </Alert>
+            )}
 
             <SelectField
               control={control}
