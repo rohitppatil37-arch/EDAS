@@ -1,5 +1,7 @@
 # MDA Earthwork Data Acquisition System
 
+# https://mda-edas.vercel.app/
+
 Marathi-language portal for the Mechanical Division (Alore) to log daily machine/vehicle
 work, track fuel efficiency, and generate admin reports. React + Vite + TypeScript on the
 frontend, Supabase (Postgres + Auth) as the backend.
