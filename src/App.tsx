@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AdminLayout } from "@/components/layout/AdminLayout";
+import { useMachinesRealtimeSync } from "@/hooks/useMachinesRealtimeSync";
 
 const WelcomePage = lazy(() => import("@/pages/WelcomePage").then((m) => ({ default: m.WelcomePage })));
 const WorkLogEntryPage = lazy(() =>
@@ -35,12 +36,17 @@ const WorkLogValidationPage = lazy(() =>
 const MachineDeploymentPage = lazy(() =>
   import("@/pages/MachineDeploymentPage").then((m) => ({ default: m.MachineDeploymentPage }))
 );
+const MachineTransferPage = lazy(() =>
+  import("@/pages/MachineTransferPage").then((m) => ({ default: m.MachineTransferPage }))
+);
 
 function PageFallback() {
   return <div className="p-10 text-center text-muted-foreground">लोड होत आहे...</div>;
 }
 
 export default function App() {
+  useMachinesRealtimeSync();
+
   return (
     <BrowserRouter>
       <Toaster position="top-center" richColors />
@@ -54,6 +60,7 @@ export default function App() {
             <Route index element={<AdminDashboardPage />} />
             <Route path="validation" element={<WorkLogValidationPage />} />
             <Route path="deployments" element={<MachineDeploymentPage />} />
+            <Route path="machine-transfer" element={<MachineTransferPage />} />
             <Route path="attendance" element={<AttendanceEntryPage />} />
             <Route path="pending" element={<PendingPaymentsPage />} />
             <Route path="gps" element={<GpsReadingEntryPage />} />

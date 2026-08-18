@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { BarChart3, ClipboardCheck, Download, Loader2, MapPin, Wallet } from "lucide-react";
+import { BarChart3, ClipboardCheck, Download, Fuel, Loader2, MapPin, TrendingUp, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import { buildMachineReport } from "@/lib/excel/buildMachineReport";
 import { buildGpsReport } from "@/lib/excel/buildGpsReport";
 import { buildAttendanceReport } from "@/lib/excel/buildAttendanceReport";
 import { buildPendingReport } from "@/lib/excel/buildPendingReport";
+import { buildFuelReport } from "@/lib/excel/buildFuelReport";
+import { buildProgressReport } from "@/lib/excel/buildProgressReport";
 import { buildGpsDiffMap } from "@/lib/gpsSeries";
 import type { GpsReading, WorkLog } from "@/types/database";
 
@@ -24,7 +26,43 @@ function todayIso() {
   return new Date().toISOString().split("T")[0];
 }
 
-type ReportType = "machine" | "gps" | "attendance" | "pending";
+// Earthwork seasons are tracked from 1 July of a given year through the
+// following June, matching the subdivision's own manual progress-report
+// convention — the "from" date picks which season's 1 July counts as start.
+function seasonStartFor(fromIso: string) {
+  const [y, m] = fromIso.split("-").map(Number);
+  const seasonYear = m >= 7 ? y : y - 1;
+  return `${seasonYear}-07-01`;
+}
+
+const PAGE_SIZE = 1000;
+
+// A season can span thousands of work logs, well past PostgREST's default
+// 1000-row cap — page through with .range() so nothing past row 1000 gets
+// silently dropped.
+async function fetchAllWorkLogs(select: string, subdivisionId: string, from: string, to: string) {
+  const all: ProgressRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("work_logs")
+      .select(select)
+      .eq("subdivision_id", subdivisionId)
+      .eq("status", "approved")
+      .gte("work_date", from)
+      .lte("work_date", to)
+      .order("work_date")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as ProgressRow[];
+    all.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return all;
+}
+
+type ReportType = "machine" | "gps" | "attendance" | "pending" | "fuel" | "progress";
 
 type WorkLogRow = WorkLog & {
   machines: { machine_name: string; machine_type: string; category: string } | null;
@@ -32,11 +70,24 @@ type WorkLogRow = WorkLog & {
   projects: { project_name: string; work_type: string } | null;
 };
 
+type ProgressRow = WorkLog & {
+  machines: {
+    machine_name: string;
+    machine_type: string;
+    category: string;
+    capacity: number | null;
+    rate: number | null;
+  } | null;
+  projects: { project_name: string } | null;
+};
+
 const reportCards: { type: ReportType; label: string; icon: typeof BarChart3 }[] = [
   { type: "machine", label: "सयंत्राच्या तास / किमी चा अहवाल", icon: BarChart3 },
   { type: "gps", label: "GPS अहवाल", icon: MapPin },
   { type: "attendance", label: "हजेरी अहवाल", icon: ClipboardCheck },
   { type: "pending", label: "प्रलंबित रकमेचा अहवाल", icon: Wallet },
+  { type: "fuel", label: "इंधन वापर अहवाल", icon: Fuel },
+  { type: "progress", label: "प्रगती अहवाल", icon: TrendingUp },
 ];
 
 export function AdminDashboardPage() {
@@ -48,6 +99,8 @@ export function AdminDashboardPage() {
     gps: { from: monthStart(), to: todayIso() },
     attendance: { from: monthStart(), to: todayIso() },
     pending: { from: monthStart(), to: todayIso() },
+    fuel: { from: monthStart(), to: todayIso() },
+    progress: { from: monthStart(), to: todayIso() },
   });
   const [downloading, setDownloading] = useState<ReportType | null>(null);
 
@@ -76,6 +129,19 @@ export function AdminDashboardPage() {
 
     setDownloading(type);
     try {
+      if (type === "progress") {
+        const seasonStart = seasonStartFor(from);
+        const progressRows = await fetchAllWorkLogs(
+          "*, machines(machine_name, machine_type, category, capacity, rate), projects(project_name)",
+          subdivisionId,
+          seasonStart,
+          to
+        );
+        await buildProgressReport(progressRows, subdivisionName, seasonStart, from, to);
+        toast.success("अहवाल डाउनलोड झाला!");
+        return;
+      }
+
       const { data: workLogData, error } = await supabase
         .from("work_logs")
         .select("*, machines(machine_name, machine_type, category), staff(name), projects(project_name, work_type)")
@@ -102,8 +168,10 @@ export function AdminDashboardPage() {
         }
       } else if (type === "attendance") {
         await buildAttendanceReport(rows, subdivisionMachines, subdivisionName, from, to);
-      } else {
+      } else if (type === "pending") {
         await buildPendingReport(rows, subdivisionMachines, subdivisionName, from, to);
+      } else {
+        await buildFuelReport(rows, subdivisionMachines, subdivisionName, from, to);
       }
       toast.success("अहवाल डाउनलोड झाला!");
     } catch (err) {

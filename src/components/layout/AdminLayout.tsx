@@ -1,6 +1,7 @@
 import { Suspense, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
+  ArrowLeftRight,
   ArrowRightLeft,
   BarChart3,
   ClipboardCheck,
@@ -37,6 +38,7 @@ const navItems = [
   { to: "/admin", label: "रिपोर्ट", shortLabel: "रिपोर्ट", icon: BarChart3, end: true },
   { to: VALIDATION_PATH, label: "पडताळणी", shortLabel: "पडताळणी", icon: ListChecks },
   { to: "/admin/deployments", label: "सयंत्र नियुक्ती", shortLabel: "नियुक्ती", icon: ArrowRightLeft },
+  { to: "/admin/machine-transfer", label: "सयंत्र स्थानांतरण", shortLabel: "स्थानांतरण", icon: ArrowLeftRight },
   { to: "/admin/attendance", label: "हजेरी", shortLabel: "हजेरी", icon: ClipboardCheck },
   { to: "/admin/pending", label: "प्रलंबित रक्कम", shortLabel: "रक्कम", icon: Wallet },
   { to: "/admin/gps", label: "GPS", shortLabel: "GPS", icon: MapPin },
@@ -188,7 +190,7 @@ export function AdminLayout() {
 
       {/* Mobile bottom tab bar */}
       <nav className="fixed inset-x-0 bottom-0 z-40 overflow-x-auto border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
-        <div className="grid grid-cols-8 min-w-160">
+        <div className="grid grid-cols-9 min-w-180">
           {navItems.map((item) => (
             <NavLink
               key={item.to}

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabaseClient";
 import type { Machine, Project, Staff, Subdivision } from "@/types/database";
 
@@ -27,6 +27,22 @@ export function useMachines() {
         .order("machine_name");
       if (error) throw error;
       return data as Machine[];
+    },
+  });
+}
+
+export function useTransferMachine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ machineId, targetSubdivisionId }: { machineId: string; targetSubdivisionId: string }) => {
+      const { error } = await supabase.rpc("transfer_machine", {
+        p_machine_id: machineId,
+        p_target_subdivision_id: targetSubdivisionId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["machines"] });
     },
   });
 }

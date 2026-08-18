@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CalendarSearch, Loader2, Navigation, Route, Save, SlidersHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarSearch,
+  CheckCircle2,
+  ClipboardList,
+  Loader2,
+  Navigation,
+  Route,
+  Save,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,8 +18,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { useMachines } from "@/lib/queries/masterData";
-import { useGpsReadingsForMachine, useSaveGpsReadings, useWorkLogDatesForMachine } from "@/lib/queries/gpsReadings";
-import { buildGpsSeries } from "@/lib/gpsSeries";
+import { useGpsReadingsForMachine, useSaveGpsReadings, useWorkLogReadingsForMachine } from "@/lib/queries/gpsReadings";
+import { cn } from "@/lib/utils";
+
+const MISMATCH_TOLERANCE = 0.5;
 
 function unique(arr: string[]) {
   return [...new Set(arr)];
@@ -28,8 +40,6 @@ function fmtDate(iso: string) {
   const [y, m, d] = iso.split("-");
   return `${d}-${m}-${y}`;
 }
-
-const EMPTY_DATES: string[] = [];
 
 export function GpsReadingEntryPage() {
   const { profile } = useAuth();
@@ -59,7 +69,7 @@ export function GpsReadingEntryPage() {
   );
   const selectedMachine = subdivisionMachines.find((m) => m.id === machineId);
 
-  const datesQuery = useWorkLogDatesForMachine({ machineId, from, to, enabled: fetchEnabled });
+  const workLogQuery = useWorkLogReadingsForMachine({ machineId, from, to, enabled: fetchEnabled });
   const readingsQuery = useGpsReadingsForMachine(machineId, fetchEnabled);
 
   useEffect(() => {
@@ -71,32 +81,40 @@ export function GpsReadingEntryPage() {
     setInputs(map);
   }, [readingsQuery.data]);
 
-  const dates = datesQuery.data ?? EMPTY_DATES;
+  // A driver can in theory log more than one entry for the same machine on the same
+  // day — aggregate those into one row: earliest start, latest end, summed diff.
+  const driverByDate = useMemo(() => {
+    const map = new Map<string, { start: number; end: number; diff: number }>();
+    (workLogQuery.data ?? []).forEach((r) => {
+      const existing = map.get(r.work_date);
+      if (existing) {
+        map.set(r.work_date, {
+          start: existing.start,
+          end: r.end_reading,
+          diff: existing.diff + r.total_reading,
+        });
+      } else {
+        map.set(r.work_date, { start: r.start_reading, end: r.end_reading, diff: r.total_reading });
+      }
+    });
+    return map;
+  }, [workLogQuery.data]);
 
+  const dates = useMemo(() => [...driverByDate.keys()].sort(), [driverByDate]);
+
+  // Admin's GPS-device entry is the day's own start-stop difference (directly
+  // comparable to the driver's dashboard-reading diff) — not a cumulative meter,
+  // so no day-to-day subtraction is needed.
   const rows = useMemo(() => {
-    const merged = new Map<string, number>();
-    (readingsQuery.data ?? []).forEach((r) => merged.set(r.reading_date, r.reading));
-    Object.entries(inputs).forEach(([date, value]) => {
-      const n = Number(value);
-      if (value !== "" && !isNaN(n)) merged.set(date, n);
-      else if (value === "") merged.delete(date);
-    });
-    const sorted = [...merged.entries()]
-      .map(([date, reading]) => ({ reading_date: date, reading }))
-      .sort((a, b) => a.reading_date.localeCompare(b.reading_date));
-    const series = buildGpsSeries(sorted);
-
     return dates.map((date) => {
-      const point = series.find((p) => p.date === date);
-      const priorPoint = [...series].reverse().find((p) => p.date < date);
-      return {
-        date,
-        start: point ? point.start : (priorPoint?.end ?? null),
-        diff: point?.diff ?? null,
-        input: inputs[date] ?? "",
-      };
+      const driver = driverByDate.get(date) ?? null;
+      const input = inputs[date] ?? "";
+      const n = Number(input);
+      const adminDiff = input !== "" && !isNaN(n) ? n : null;
+      const mismatch = adminDiff != null && driver ? adminDiff - driver.diff : null;
+      return { date, input, driver, mismatch };
     });
-  }, [dates, inputs, readingsQuery.data]);
+  }, [dates, inputs, driverByDate]);
 
   function handleFetch() {
     if (!machineId) {
@@ -210,9 +228,9 @@ export function GpsReadingEntryPage() {
             size="lg"
             className="w-full"
             onClick={handleFetch}
-            disabled={datesQuery.isFetching || readingsQuery.isFetching}
+            disabled={workLogQuery.isFetching || readingsQuery.isFetching}
           >
-            {datesQuery.isFetching || readingsQuery.isFetching ? (
+            {workLogQuery.isFetching || readingsQuery.isFetching ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <CalendarSearch className="size-4" />
@@ -227,7 +245,7 @@ export function GpsReadingEntryPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-primary">
               <Route className="size-4.5" />
-              {selectedMachine?.machine_name} — GPS रिडींग
+              {selectedMachine?.machine_name} — GPS फरक पडताळणी
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -240,21 +258,52 @@ export function GpsReadingEntryPage() {
               <>
                 <div className="space-y-2">
                   {rows.map((row) => (
-                    <div key={row.date} className="rounded-lg border p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <p className="text-sm font-semibold">{fmtDate(row.date)}</p>
-                        <p className="text-xs text-muted-foreground">
-                          मागील: {row.start ?? "-"} · फरक:{" "}
-                          <span className="font-semibold text-primary">{row.diff ?? "-"}</span>
-                        </p>
+                    <div key={row.date} className="space-y-2 rounded-lg border p-3">
+                      <p className="text-sm font-semibold">{fmtDate(row.date)}</p>
+
+                      {row.driver && (
+                        <div className="flex items-center justify-between gap-2 rounded-md bg-accent/60 px-2.5 py-1.5 text-xs">
+                          <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <ClipboardList className="size-3.5 shrink-0" />
+                            चालकाने भरलेले: {row.driver.start} → {row.driver.end}
+                          </span>
+                          <span className="shrink-0 font-semibold text-foreground">फरक: {row.driver.diff}</span>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">GPS डिव्हाइसवरील फरक</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="डिव्हाइसवरील फरक भरा"
+                          value={row.input}
+                          onChange={(e) => updateInput(row.date, e.target.value)}
+                        />
                       </div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="GPS रिडींग भरा"
-                        value={row.input}
-                        onChange={(e) => updateInput(row.date, e.target.value)}
-                      />
+
+                      {row.mismatch != null && (
+                        <p
+                          className={cn(
+                            "flex items-center gap-1.5 text-xs font-medium",
+                            Math.abs(row.mismatch) > MISMATCH_TOLERANCE ? "text-warning" : "text-success"
+                          )}
+                        >
+                          {Math.abs(row.mismatch) > MISMATCH_TOLERANCE ? (
+                            <>
+                              <AlertTriangle className="size-3.5 shrink-0" />
+                              जुळत नाही — तफावत: {row.mismatch > 0 ? "+" : ""}
+                              {row.mismatch.toFixed(2)}
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="size-3.5 shrink-0" />
+                              जुळते (तफावत: {row.mismatch > 0 ? "+" : ""}
+                              {row.mismatch.toFixed(2)})
+                            </>
+                          )}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
